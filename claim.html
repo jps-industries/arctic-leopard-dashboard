@@ -36,12 +36,6 @@ button:disabled{opacity:.6;cursor:default}
 .done{border:1px solid var(--line);border-left:4px solid var(--accent);padding:20px;border-radius:4px}
 .done h2{margin:0;font-size:22px}
 .files{font-size:13px;color:var(--muted)}
-.acw{position:relative}
-.sugg{position:absolute;left:0;right:0;top:100%;z-index:5;margin:2px 0 0;padding:0;list-style:none;background:var(--panel);border:1px solid var(--line);border-radius:4px;max-height:260px;overflow:auto}
-.sugg li{padding:10px 12px;cursor:pointer;font-size:14px;border-bottom:1px solid var(--line)}
-.sugg li:last-child{border-bottom:0}
-.sugg li:hover,.sugg li[aria-selected=true]{background:#262626}
-.sugg li small{display:block;color:var(--muted);font-size:12px}
 @media (max-width:600px){fieldset{grid-template-columns:1fr}}
 </style>
 </head>
@@ -57,7 +51,7 @@ button:disabled{opacity:.6;cursor:default}
     <div class="f"><label for="name">Full name <b>*</b></label><input id="name" name="name" autocomplete="name" required></div>
     <div class="f"><label for="phone">Phone <b>*</b></label><input id="phone" name="phone" type="tel" autocomplete="tel" required></div>
     <div class="f full"><label for="email">Email <b>*</b></label><input id="email" name="email" type="email" autocomplete="email" required></div>
-    <div class="f full"><label for="address">Street number and name <b>*</b></label><div class="acw"><input id="address" name="address" autocomplete="address-line1" required placeholder="Start typing, e.g. 2/14 Foley Street, Balcatta" aria-autocomplete="list" aria-controls="addrList"><ul id="addrList" class="sugg" role="listbox" hidden></ul></div><span class="hint">Pick your address from the list to fill in suburb, state and postcode. This is where we'd send parts if your claim needs them.</span></div>
+    <div class="f full"><label for="address">Street number and name <b>*</b></label><input id="address" name="address" autocomplete="address-line1" required placeholder="e.g. 2/14 Foley Street"><span class="hint">Where we'd send parts if your claim needs them.</span></div>
     <div class="f"><label for="suburb">Suburb <b>*</b></label><input id="suburb" name="suburb" autocomplete="address-level2" required></div>
     <div class="f"><label for="state">State <b>*</b></label><select id="state" name="state" required><option value="">Select</option><option>WA</option><option>NSW</option><option>VIC</option><option>QLD</option><option>SA</option><option>TAS</option><option>ACT</option><option>NT</option></select></div>
     <div class="f"><label for="postcode">Postcode <b>*</b></label><input id="postcode" name="postcode" inputmode="numeric" autocomplete="postal-code" required></div>
@@ -99,46 +93,6 @@ for (const [inp, list] of [["files", "fileList"], ["proof", "proofList"]]) docum
   const fs = [...e.target.files];
   document.getElementById(list).textContent = fs.length ? fs.map(x => x.name).join(", ") : "";
 };
-/* Address search (OpenStreetMap / Photon, no key). If it fails, the fields are filled by hand as usual. */
-const STATE_AB = { "western australia": "WA", "new south wales": "NSW", "victoria": "VIC", "queensland": "QLD", "south australia": "SA", "tasmania": "TAS", "australian capital territory": "ACT", "northern territory": "NT" };
-const addr = document.getElementById("address"), sug = document.getElementById("addrList");
-let addrT, addrSeq = 0, addrHits = [], addrSel = -1;
-const hideSug = () => { sug.hidden = true; sug.innerHTML = ""; addrHits = []; addrSel = -1; };
-const pickAddr = h => {
-  addr.value = h.line; if (h.suburb) document.getElementById("suburb").value = h.suburb;
-  if (h.state) document.getElementById("state").value = h.state; if (h.postcode) document.getElementById("postcode").value = h.postcode;
-  hideSug(); postHeight();
-};
-addr.addEventListener("input", () => {
-  clearTimeout(addrT); const raw = addr.value.trim(); if (raw.length < 4) return hideSug();
-  // Unit numbers like "2/14 Foley St" or "Unit 2, 14 Foley St": search without the unit, add it back after.
-  const um = raw.match(/^\s*(?:(?:unit|u|apt|shop|suite)\s*)?([0-9]+[a-z]?)\s*(?:\/|,)\s*([0-9]+[a-z]?\s+.*)$/i);
-  const unit = um ? um[1] : "", q = um ? um[2] : raw, typedNo = (q.match(/^([0-9]+[a-z]?)\s/i) || [])[1] || "";
-  addrT = setTimeout(async () => {
-    const my = ++addrSeq;
-    try {
-      const r = await fetch("https://photon.komoot.io/api/?limit=10&lang=en&layer=house&layer=street&bbox=112,-44,154,-10&q=" + encodeURIComponent(q));
-      const j = await r.json(); if (my !== addrSeq) return;
-      addrHits = (j.features || []).map(x => x.properties || {}).filter(p => p.countrycode === "AU" && (p.street || p.name)).map(p => {
-        const no = p.housenumber || typedNo, line = (unit && no ? unit + "/" : "") + [no, p.street || p.name].filter(Boolean).join(" ");
-        const suburb = p.locality || p.district || p.city || "", state = STATE_AB[(p.state || "").toLowerCase()] || "", postcode = p.postcode || "";
-        return { line, suburb, state, postcode };
-      }).filter((h, i, a) => a.findIndex(o => o.line + o.suburb === h.line + h.suburb) === i).slice(0, 5);
-      if (!addrHits.length) return hideSug();
-      sug.innerHTML = addrHits.map((h, i) => `<li role="option" data-i="${i}">${h.line.replace(/[<>&]/g, "")}<small>${[h.suburb, h.state, h.postcode].filter(Boolean).join(" ").replace(/[<>&]/g, "")}</small></li>`).join("");
-      sug.hidden = false; addrSel = -1; postHeight();
-    } catch (e) { hideSug(); }
-  }, 300);
-});
-sug.addEventListener("mousedown", e => { const li = e.target.closest("li"); if (li) { e.preventDefault(); pickAddr(addrHits[+li.dataset.i]); } });
-addr.addEventListener("keydown", e => {
-  if (sug.hidden) return;
-  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); addrSel = (addrSel + (e.key === "ArrowDown" ? 1 : -1) + addrHits.length) % addrHits.length; [...sug.children].forEach((li, i) => li.setAttribute("aria-selected", i === addrSel)); }
-  else if (e.key === "Enter" && addrSel >= 0) { e.preventDefault(); pickAddr(addrHits[addrSel]); }
-  else if (e.key === "Escape") hideSug();
-});
-addr.addEventListener("blur", () => setTimeout(hideSug, 150));
-
 f.onsubmit = async e => {
   e.preventDefault(); err.textContent = "";
   for (const id of ["name", "phone", "email", "address", "suburb", "state", "postcode", "model", "frame_no", "hours_km", "purchase_date", "invoice_no", "purchased_from", "category", "problem"]) {
