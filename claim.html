@@ -93,7 +93,7 @@ button:disabled{opacity:.6;cursor:default}
 <script>
 const ENDPOINT = "https://dobonmovezqepjgzfwmt.supabase.co/functions/v1/al-warranty-submit";
 const f = document.getElementById("claim"), err = document.getElementById("err"), go = document.getElementById("go");
-function postHeight() { try { parent.postMessage({ alClaimHeight: document.documentElement.scrollHeight }, "*"); } catch (e) {} }
+function postHeight() { try { parent.postMessage({ alClaimHeight: Math.ceil(document.body.getBoundingClientRect().height) }, "*"); } catch (e) {} }
 new ResizeObserver(postHeight).observe(document.body);
 for (const [inp, list] of [["files", "fileList"], ["proof", "proofList"]]) document.getElementById(inp).onchange = e => {
   const fs = [...e.target.files];
