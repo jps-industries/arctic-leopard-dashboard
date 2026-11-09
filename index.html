@@ -126,6 +126,9 @@ td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
 .media a span{position:absolute;left:0;right:0;bottom:0;background:rgba(255,255,255,.85);padding:1px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .events{list-style:none;margin:0;padding:0;font-size:12.5px;color:var(--muted)}
 .events li{padding:3px 0;border-bottom:1px dashed var(--line)}
+.events.log li{padding:7px 0}.events.log .tag{font-size:11px;padding:1px 6px;border-radius:4px;background:var(--line);color:var(--muted);margin-right:4px}
+.lognew{display:grid;grid-template-columns:140px 1fr auto;gap:8px;align-items:start;margin-bottom:8px}.lognew textarea{min-height:38px}
+@media(max-width:600px){.lognew{grid-template-columns:1fr}}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px}
 .kv dt{color:var(--muted)}
 .kv dd{margin:0}
@@ -837,7 +840,7 @@ VIEWS.warranty = () => {
   $("#expBtn").onclick = openExport;
   document.querySelectorAll("tr[data-id]").forEach(r => r.onclick = () => openClaim(+r.dataset.id));
 };
-const CLAIM_F = () => [["status","Status","select",{options:opt(CLAIM_ST),blank:false}],["opened_at","Opened","date",{def:today()}],["model_id","Model","select",{options:modelOpts(),int:1}],["reported_frame_no","Frame / serial no."],["purchased_from","Bought from","text",{list:"soldByList",ph:"Us, a dealer, Global Bike, Pedl…"}],["purchase_date","Purchase date","date"],["invoice_no","Invoice / receipt no."],["customer_id","Customer","select",{options:custOpts(),int:1,full:1}],["hours_km","Hours / km"],["category","Fault area","select",{options:CATS.map(c => [c, cap(c)])}],["factory_ref","Factory claim ref.","text",{full:1}],["problem","Problem (what the customer reports)","textarea"],["diagnosis","Diagnosis (what we found)","textarea"],["notes","Internal notes","textarea"]];
+const CLAIM_F = () => [["status","Status","select",{options:opt(CLAIM_ST),blank:false}],["opened_at","Opened","date",{def:today()}],["model_id","Model","select",{options:modelOpts(),int:1}],["reported_frame_no","Frame / serial no."],["purchased_from","Bought from","text",{list:"soldByList",ph:"Us, a dealer, Global Bike, Pedl…"}],["purchase_date","Purchase date","date"],["invoice_no","Invoice / receipt no."],["customer_id","Customer","select",{options:custOpts(),int:1,full:1}],["hours_km","Hours / km"],["category","Fault area","select",{options:CATS.map(c => [c, cap(c)])}],["factory_ref","Factory claim ref.","text",{full:1}],["problem","Problem (what the customer reports)","textarea"],["diagnosis","Diagnosis (what we found)","textarea"]];
 const CLAIM_SHIP_F = [["ship_address","Ship to","text",{full:1,ph:"Street, suburb, state, postcode"}],["ship_carrier","Carrier","select",{options:opt(CARRIERS)}],["ship_tracking","Tracking no."],["shipped_at","Shipped","date"],["delivered_at","Customer received","date"]];
 const soldByNames = () => { const seen = new Map(); for (const x of ["Arctic Leopard Australia", ...S.d.dealers.map(d => d.business_name), "Global Bike", "Pedl", ...S.d.claims.map(c => (c.purchased_from || "").trim())]) if (x && !seen.has(x.toLowerCase())) seen.set(x.toLowerCase(), x); return [...seen.values()]; };
 const soldByList = () => `<datalist id="soldByList">${soldByNames().map(x => `<option value="${esc(x)}">`).join("")}</datalist>`;
@@ -854,10 +857,29 @@ async function openClaim(id, preset) {
       `<div class="section"><h4>Parts needed <button class="linkbtn" id="addWp" type="button">+ Add part</button></h4>${partDatalist()}<div class="plines" id="wpList"></div>
       <p class="small muted" style="margin:0">"From factory" parts go on the factory request. "From our stock" parts come out of stock when marked Fitted.</p></div>` +
       `<div class="section" id="shipSec"><h4>Shipping to the customer <span id="trackLink"></span></h4>${fieldsHtml(CLAIM_SHIP_F, c)}<p class="small muted" style="margin:0">Set status to "Shipped to customer" with the tracking number. Mark "Customer received" before closing the claim.</p></div>` +
-      (id ? `<div class="section"><h4>Proof of purchase, photos and video <label class="btn sm" style="cursor:pointer">Upload<input type="file" id="upl" accept="image/*,video/*,application/pdf" multiple hidden></label></h4><div class="media">${media.map(m => `<a href="${esc(urls[m.id] || "#")}" target="_blank" rel="noopener" style="${/\.(jpe?g|png|webp|gif|heic)$/i.test(m.storage_path) && urls[m.id] ? `background-image:url('${esc(urls[m.id])}')` : ""}"><span>${m.caption === "Proof of purchase" ? "<b>Proof of purchase</b> · " : ""}${esc(m.storage_path.split("/").pop())}</span></a>`).join("") || `<span class="small muted">None yet.</span>`}</div></div>
-      <div class="section"><h4>History</h4><ul class="events">${events.map(e => `<li>${new Date(e.created_at).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" })}: ${e.from_status ? esc((CLAIM_ST[e.from_status] || [e.from_status])[0]) + " → " : ""}${esc((CLAIM_ST[e.to_status] || [e.to_status || ""])[0])}${e.note ? " · " + esc(e.note) : ""}</li>`).join("")}${c.sent_to_factory_at ? `<li>Sent to factory ${fdate(c.sent_to_factory_at)} (${esc(c.export_batch || "")})</li>` : ""}</ul></div>` : `<p class="small muted">Save the claim to add photos.</p>`),
+      (id ? `<div class="section"><h4>Proof of purchase, photos and video <label class="btn sm" style="cursor:pointer">Upload<input type="file" id="upl" accept="image/*,video/*,application/pdf" multiple hidden></label></h4><div class="media">${media.map(m => `<a href="${esc(urls[m.id] || "#")}" target="_blank" rel="noopener" style="${/\.(jpe?g|png|webp|gif|heic)$/i.test(m.storage_path) && urls[m.id] ? `background-image:url('${esc(urls[m.id])}')` : ""}"><span>${m.caption === "Proof of purchase" ? "<b>Proof of purchase</b> · " : ""}${esc(m.storage_path.split("/").pop())}</span></a>`).join("") || `<span class="small muted">None yet.</span>`}</div></div>` : `<p class="small muted">Save the claim to add photos.</p>`) +
+      `<div class="section"><h4>Notes log</h4><div class="lognew"><input type="date" id="logDate" value="${today()}" title="Day it was done"><textarea id="logText" rows="2" placeholder="What was done, e.g. Parts ordered from factory, awaiting shipping quote"></textarea><button class="btn sm" id="logAdd" type="button">${id ? "Add note" : "Adds on save"}</button></div><ul class="events log" id="logList"></ul></div>`,
     foot: `${id ? delBtn() : "<span></span>"}<button class="btn primary" id="saveBtn">Save claim</button>` });
   const list = dr.querySelector("#wpList");
+  let log = events.slice();
+  const who = e => e.created_by_email ? e.created_by_email.split("@")[0] : "";
+  const drawLog = () => {
+    const items = log.slice().sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id).map(e => {
+      const when = `<b>${new Date(e.created_at).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short", year: "2-digit" })}</b>`;
+      const what = e.to_status ? `<span class="tag">Status</span> ${e.from_status ? esc((CLAIM_ST[e.from_status] || [e.from_status])[0]) + " → " : ""}${esc((CLAIM_ST[e.to_status] || [e.to_status])[0])}${e.note ? " · " + esc(e.note) : ""}` : `<span style="white-space:pre-wrap;color:var(--ink)">${esc(e.note || "")}</span>`;
+      return `<li>${when}${who(e) ? ` <span class="muted">· ${esc(who(e))}</span>` : ""}<div>${what}</div></li>`; });
+    if (c.sent_to_factory_at) items.push(`<li><b>${fdate(c.sent_to_factory_at)}</b><div><span class="tag">Factory</span> Sent to factory (${esc(c.export_batch || "")})</div></li>`);
+    dr.querySelector("#logList").innerHTML = items.join("") || `<li class="muted">Nothing logged yet.</li>`;
+  };
+  const addLog = async claimId => {
+    const t = dr.querySelector("#logText"), note = t.value.trim(); if (!note) return;
+    const dv = dr.querySelector("#logDate").value || today();
+    const row = { claim_id: claimId, note }; if (dv !== today()) row.created_at = new Date(dv + "T12:00:00").toISOString();
+    const r = await sb.from("al_warranty_events").insert(row).select("*").single(); if (r.error) throw r.error;
+    log.push({ created_at: new Date().toISOString(), ...r.data }); t.value = ""; dr.querySelector("#logDate").value = today(); drawLog();
+  };
+  drawLog();
+  if (id) dr.querySelector("#logAdd").onclick = guard(() => addLog(id)); else dr.querySelector("#logAdd").disabled = true;
   const drawWp = () => {
     list.innerHTML = wp.map((w, i) => `<div class="pline"><input data-i="${i}" data-k="part" list="partList" placeholder="Part (or type a description)" value="${esc(w.part_id ? (byId(S.d.parts, w.part_id) || {}).name : w.description || "")}"><input data-i="${i}" data-k="qty" type="number" min="1" value="${w.qty}"><select data-i="${i}" data-k="source" class="ps"><option value="factory"${w.source === "factory" ? " selected" : ""}>From factory</option><option value="from_stock"${w.source === "from_stock" ? " selected" : ""}>From our stock</option></select><select data-i="${i}" data-k="status" class="pst">${Object.entries(WP_ST).map(([k, l]) => `<option value="${k}"${w.status === k ? " selected" : ""}>${l}</option>`).join("")}</select><button class="rm" data-rm="${i}" type="button" title="Remove">×</button></div>`).join("") || `<span class="small muted">No parts yet.</span>`;
     list.querySelectorAll("[data-k]").forEach(el => el.onchange = () => { const w = wp[+el.dataset.i]; const k = el.dataset.k; if (k === "part") { const p = partFromInput(el.value); w.part_id = p ? p.id : null; w.description = p ? null : el.value.trim(); } else if (k === "qty") w.qty = Math.max(1, +el.value || 1); else w[k] = el.value; });
@@ -895,6 +917,7 @@ async function openClaim(id, preset) {
     const md = row.purchased_from && S.d.dealers.find(x => x.business_name.toLowerCase() === row.purchased_from.toLowerCase());
     row.dealer_id = md ? md.id : mb ? mb.dealer_id : null;
     const saved = await saveRow("al_warranty_claims", id, row);
+    await addLog(saved.id || id);
     const keep = wp.filter(w => w.part_id || w.description);
     const old = id ? S.d.wparts.filter(w => w.claim_id === id) : [];
     const gone = old.filter(o => !keep.some(k => k.id === o.id)).map(o => o.id);
