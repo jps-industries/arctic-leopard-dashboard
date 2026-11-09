@@ -123,6 +123,8 @@ td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
 .rm:hover{color:var(--red)}
 .media{display:flex;flex-wrap:wrap;gap:8px}
 .media a{display:block;width:96px;height:96px;border:1px solid var(--line);background:var(--surface-2) center/cover no-repeat;position:relative;font-size:11px;color:var(--muted);text-decoration:none;overflow:hidden}
+.mtile{position:relative}.mdel{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;border:0;background:rgba(0,0,0,.65);color:#fff;font-size:15px;line-height:22px;padding:0;cursor:pointer}.mdel:hover{background:var(--accent)}
+.logact{float:right;font-size:12px;display:flex;gap:10px}
 .media a span{position:absolute;left:0;right:0;bottom:0;background:rgba(255,255,255,.85);padding:1px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .events{list-style:none;margin:0;padding:0;font-size:12.5px;color:var(--muted)}
 .events li{padding:3px 0;border-bottom:1px dashed var(--line)}
@@ -222,16 +224,18 @@ function localSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
 
 async function loadAll() {
   const t = n => sb.from(n).select("*");
-  const [models, dealers, customers, shipments, lines, parts, bikes, claims, wparts, preorders, pdi, orders, loans, codeOrders] = await Promise.all([
+  const [models, dealers, customers, shipments, lines, parts, bikes, claims, wparts, preorders, pdi, orders, loans, codeOrders, staff] = await Promise.all([
     q(t("al_models").order("id")), q(t("al_dealers").order("business_name")), q(t("al_customers").order("full_name")),
     q(t("al_shipments").order("invoice_date", { ascending: false })), q(t("al_shipment_lines").order("id")),
     q(t("al_part_stock").order("name")), q(t("al_bikes").order("id")), q(t("al_warranty_claims").order("id", { ascending: false })),
     q(t("al_warranty_parts").order("id")), q(t("al_preorders").order("id", { ascending: false })), q(t("al_pdi")), q(t("al_shopify_orders").order("processed_at", { ascending: false }).limit(50)),
     q(t("al_bike_loans").order("id", { ascending: false })),
-    q(sb.from("al_shopify_orders").select("shopify_order_id,order_name,ordered_at,total_aud,subtotal_aud,parts_aud,bikes_reserved,preorders_created,discount_codes").not("discount_codes", "is", null).order("ordered_at", { ascending: false }))
+    q(sb.from("al_shopify_orders").select("shopify_order_id,order_name,ordered_at,total_aud,subtotal_aud,parts_aud,bikes_reserved,preorders_created,discount_codes").not("discount_codes", "is", null).order("ordered_at", { ascending: false })),
+    sb.from("al_staff").select("email,name").then(r => r.data || [])
   ]);
-  Object.assign(S.d, { models, dealers, customers, shipments, lines, parts, bikes, claims, wparts, preorders, pdi, orders, loans, codeOrders });
+  Object.assign(S.d, { models, dealers, customers, shipments, lines, parts, bikes, claims, wparts, preorders, pdi, orders, loans, codeOrders, staff });
 }
+const staffName = email => { if (!email) return ""; const st = (S.d.staff || []).find(x => x.email.toLowerCase() === email.toLowerCase()); return st && st.name ? st.name : email.split("@")[0]; };
 const model = id => byId(S.d.models, id) || {};
 const bikeNo = b => S.d.bikes.filter(x => x.model_id === b.model_id && x.id <= b.id).length;
 const bikeLabel = b => b ? `${b.unit_no || (model(b.model_id).name || "Bike") + " #" + bikeNo(b)}${b.frame_no ? " · " + b.frame_no : ""}` : "";
@@ -857,19 +861,35 @@ async function openClaim(id, preset) {
       `<div class="section"><h4>Parts needed <button class="linkbtn" id="addWp" type="button">+ Add part</button></h4>${partDatalist()}<div class="plines" id="wpList"></div>
       <p class="small muted" style="margin:0">"From factory" parts go on the factory request. "From our stock" parts come out of stock when marked Fitted.</p></div>` +
       `<div class="section" id="shipSec"><h4>Shipping to the customer <span id="trackLink"></span></h4>${fieldsHtml(CLAIM_SHIP_F, c)}<p class="small muted" style="margin:0">Set status to "Shipped to customer" with the tracking number. Mark "Customer received" before closing the claim.</p></div>` +
-      (id ? `<div class="section"><h4>Proof of purchase, photos and video <label class="btn sm" style="cursor:pointer">Upload<input type="file" id="upl" accept="image/*,video/*,application/pdf" multiple hidden></label></h4><div class="media">${media.map(m => `<a href="${esc(urls[m.id] || "#")}" target="_blank" rel="noopener" style="${/\.(jpe?g|png|webp|gif|heic)$/i.test(m.storage_path) && urls[m.id] ? `background-image:url('${esc(urls[m.id])}')` : ""}"><span>${m.caption === "Proof of purchase" ? "<b>Proof of purchase</b> · " : ""}${esc(m.storage_path.split("/").pop())}</span></a>`).join("") || `<span class="small muted">None yet.</span>`}</div></div>` : `<p class="small muted">Save the claim to add photos.</p>`) +
+      (id ? `<div class="section"><h4>Proof of purchase, photos and video <label class="btn sm" style="cursor:pointer">Upload<input type="file" id="upl" accept="image/*,video/*,application/pdf" multiple hidden></label></h4><div class="media">${media.map(m => `<div class="mtile"><a href="${esc(urls[m.id] || "#")}" target="_blank" rel="noopener" style="${/\.(jpe?g|png|webp|gif|heic)$/i.test(m.storage_path) && urls[m.id] ? `background-image:url('${esc(urls[m.id])}')` : ""}"><span>${m.caption === "Proof of purchase" ? "<b>Proof of purchase</b> · " : ""}${esc(m.storage_path.split("/").pop())}</span></a><button type="button" class="mdel" data-mdel="${m.id}" title="Remove this file">×</button></div>`).join("") || `<span class="small muted">None yet.</span>`}</div></div>` : `<p class="small muted">Save the claim to add photos.</p>`) +
       `<div class="section"><h4>Notes log</h4><div class="lognew"><input type="date" id="logDate" value="${today()}" title="Day it was done"><textarea id="logText" rows="2" placeholder="What was done, e.g. Parts ordered from factory, awaiting shipping quote"></textarea><button class="btn sm" id="logAdd" type="button">${id ? "Add note" : "Adds on save"}</button></div><ul class="events log" id="logList"></ul></div>`,
     foot: `${id ? delBtn() : "<span></span>"}<button class="btn primary" id="saveBtn">Save claim</button>` });
   const list = dr.querySelector("#wpList");
   let log = events.slice();
-  const who = e => e.created_by_email ? e.created_by_email.split("@")[0] : "";
+  const who = e => staffName(e.created_by_email);
+  let editing = null;
   const drawLog = () => {
     const items = log.slice().sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id).map(e => {
       const when = `<b>${new Date(e.created_at).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short", year: "2-digit" })}</b>`;
       const what = e.to_status ? `<span class="tag">Status</span> ${e.from_status ? esc((CLAIM_ST[e.from_status] || [e.from_status])[0]) + " → " : ""}${esc((CLAIM_ST[e.to_status] || [e.to_status])[0])}${e.note ? " · " + esc(e.note) : ""}` : `<span style="white-space:pre-wrap;color:var(--ink)">${esc(e.note || "")}</span>`;
-      return `<li>${when}${who(e) ? ` <span class="muted">· ${esc(who(e))}</span>` : ""}<div>${what}</div></li>`; });
+      if (editing === e.id) return `<li><div class="lognew" style="margin:0"><input type="date" id="leDate" value="${new Date(e.created_at).toLocaleDateString("en-CA")}"><textarea id="leText" rows="2">${esc(e.note || "")}</textarea><span style="display:flex;gap:6px"><button class="btn sm primary" type="button" id="leSave">Save</button><button class="btn sm" type="button" id="leCancel">Cancel</button></span></div></li>`;
+      const acts = e.to_status ? "" : ` <span class="logact"><button type="button" class="linkbtn" data-ledit="${e.id}">Edit</button> <button type="button" class="linkbtn" data-ldel="${e.id}">Delete</button></span>`;
+      return `<li>${when}${who(e) ? ` <span class="muted">· ${esc(who(e))}</span>` : ""}${acts}<div>${what}</div></li>`; });
     if (c.sent_to_factory_at) items.push(`<li><b>${fdate(c.sent_to_factory_at)}</b><div><span class="tag">Factory</span> Sent to factory (${esc(c.export_batch || "")})</div></li>`);
-    dr.querySelector("#logList").innerHTML = items.join("") || `<li class="muted">Nothing logged yet.</li>`;
+    const ul = dr.querySelector("#logList");
+    ul.innerHTML = items.join("") || `<li class="muted">Nothing logged yet.</li>`;
+    ul.querySelectorAll("[data-ledit]").forEach(b => b.onclick = () => { editing = +b.dataset.ledit; drawLog(); ul.querySelector("#leText").focus(); });
+    ul.querySelectorAll("[data-ldel]").forEach(b => b.onclick = guard(async () => {
+      if (!confirm("Delete this note?")) return;
+      const lid = +b.dataset.ldel; await q(sb.from("al_warranty_events").delete().eq("id", lid)); log = log.filter(x => x.id !== lid); drawLog(); toast("Note deleted"); }));
+    if (editing != null) {
+      ul.querySelector("#leCancel").onclick = () => { editing = null; drawLog(); };
+      ul.querySelector("#leSave").onclick = guard(async () => {
+        const e = log.find(x => x.id === editing), note = ul.querySelector("#leText").value.trim(), dv = ul.querySelector("#leDate").value;
+        if (!note) throw new Error("Write the note, or use Delete");
+        const upd = { note }; if (dv && dv !== new Date(e.created_at).toLocaleDateString("en-CA")) upd.created_at = new Date(dv + "T12:00:00").toISOString();
+        await q(sb.from("al_warranty_events").update(upd).eq("id", e.id)); Object.assign(e, upd); editing = null; drawLog(); toast("Note updated"); });
+    }
   };
   const addLog = async claimId => {
     const t = dr.querySelector("#logText"), note = t.value.trim(); if (!note) return;
@@ -926,14 +946,24 @@ async function openClaim(id, preset) {
     await loadAll(); render(); toast(id ? "Saved" : `Claim ${saved.claim_no} created`); if (!id) openClaim(saved.id); else closeDrawer();
   });
   armDelete(dr, async () => { const ms = media.map(m => m.storage_path); if (ms.length) await sb.storage.from(BUCKET).remove(ms); await q(sb.from("al_warranty_claims").delete().eq("id", id)); });
+  dr.querySelectorAll("[data-mdel]").forEach(b => b.onclick = guard(async ev => {
+    ev.preventDefault(); ev.stopPropagation();
+    const m = media.find(x => x.id === +b.dataset.mdel); if (!m || !confirm(`Remove ${m.storage_path.split("/").pop()} from this claim?`)) return;
+    await sb.storage.from(BUCKET).remove([m.storage_path]);
+    await q(sb.from("al_warranty_media").delete().eq("id", m.id));
+    toast("File removed"); openClaim(id);
+  }));
   const up = dr.querySelector("#upl");
   if (up) up.onchange = guard(async () => {
+    let skipped = 0;
     for (const file of up.files) {
-      const path = `${c.claim_no}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
+      const safe = file.name.replace(/[^\w.\-]+/g, "_");
+      if (media.some(m => m.storage_path.endsWith("-" + safe))) { skipped++; continue; }
+      const path = `${c.claim_no}/${Date.now()}-${safe}`;
       const r = await sb.storage.from(BUCKET).upload(path, file, { contentType: file.type || undefined }); if (r.error) throw new Error(r.error.message);
       await q(sb.from("al_warranty_media").insert({ claim_id: id, storage_path: path }));
     }
-    toast("Uploaded"); openClaim(id);
+    toast(skipped ? `Uploaded (${skipped} already attached, skipped)` : "Uploaded"); openClaim(id);
   });
 }
 function openExport() {
