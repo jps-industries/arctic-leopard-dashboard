@@ -962,7 +962,7 @@ async function openClaim(id, preset) {
   dr.querySelector("#f_ship_carrier").onchange = drawTrack; dr.querySelector("#f_ship_tracking").oninput = drawTrack; showShip(); drawTrack();
   const cs = dr.querySelector("#f_customer_id");
   cs.insertAdjacentHTML("afterend", `<div id="custAddr" class="small muted"></div>`);
-  const drawAddr = () => { const cu = byId(S.d.customers, +cs.value); dr.querySelector("#custAddr").innerHTML = !cu ? "" : `${esc(fullAddr(cu) || "No address on file yet")}${cu.phone ? " · " + esc(cu.phone) : ""}${cu.email ? " · " + esc(cu.email) : ""} · <button type="button" class="linkbtn" id="editCust">Edit customer</button>`; const ec = dr.querySelector("#editCust"); if (ec) ec.onclick = () => openSimple("al_customers", CUST_F, cu.id, "customer"); };
+  const drawAddr = () => { const cu = byId(S.d.customers, +cs.value); dr.querySelector("#custAddr").innerHTML = !cu ? "" : `${esc(fullAddr(cu) || "No address on file yet")}${cu.phone ? " · " + esc(cu.phone) : ""}${cu.email ? " · " + esc(cu.email) : ""} · <button type="button" class="linkbtn" id="editCust">Customer profile</button>`; const ec = dr.querySelector("#editCust"); if (ec) ec.onclick = () => openCustomer(cu.id); };
   cs.addEventListener("change", drawAddr); drawAddr();
   dr.querySelector("#saveBtn").onclick = guard(async () => {
     const row = Object.assign(readFields(CLAIM_F()), readFields(CLAIM_SHIP_F));
@@ -1133,12 +1133,62 @@ VIEWS.customers = () => {
   const d = S.d, f = S.f, s = (f.custQ || "").toLowerCase();
   const list = d.customers.filter(c => !s || [c.full_name, c.phone, c.email, fullAddr(c)].join(" ").toLowerCase().includes(s));
   view(`<div class="tools"><div class="search"><input id="uq" type="search" placeholder="Search customers" value="${esc(f.custQ || "")}"></div><button class="btn primary" id="newC">+ Customer</button></div>
-  <div class="tablewrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Address</th><th>Bikes</th><th class="r">Claims</th></tr></thead><tbody>
-  ${list.map(c => `<tr class="click" data-id="${c.id}"><td><b>${esc(c.full_name)}</b></td><td>${esc(c.phone || "")}</td><td class="small">${esc(c.email || "")}</td><td class="small">${esc(fullAddr(c))}</td><td class="small">${d.bikes.filter(b => b.customer_id === c.id).map(b => esc(bikeLabel(b))).join("<br>")}</td><td class="r">${d.claims.filter(x => x.customer_id === c.id).length || ""}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No customers yet. They're added when you sell a bike or open a warranty claim.</td></tr>`}</tbody></table></div>`);
+  <div class="tablewrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Address</th></tr></thead><tbody>
+  ${list.map(c => `<tr class="click" data-id="${c.id}"><td><b>${esc(c.full_name)}</b></td><td>${esc(c.phone || "")}</td><td class="small">${esc(c.email || "")}</td><td class="small">${esc(fullAddr(c))}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">No customers yet. They're added when you sell a bike or open a warranty claim.</td></tr>`}</tbody></table></div>`);
   $("#uq").oninput = e => { f.custQ = e.target.value; clearTimeout(S.tq); S.tq = setTimeout(() => { VIEWS.customers(); const i = $("#uq"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 200); };
   $("#newC").onclick = () => openSimple("al_customers", CUST_F, null, "customer");
-  document.querySelectorAll("tr[data-id]").forEach(r => r.onclick = () => openSimple("al_customers", CUST_F, +r.dataset.id, "customer"));
+  document.querySelectorAll("tr[data-id]").forEach(r => r.onclick = () => openCustomer(+r.dataset.id));
 };
+// Dated, editable notes log in a drawer: needs #nlDate, #nlText, #nlAdd and #nlList in the drawer body.
+function wireNotes(dr, table, fk, fkId, notes) {
+  let log = notes.slice(), editing = null;
+  const draw = () => {
+    const ul = dr.querySelector("#nlList");
+    ul.innerHTML = log.slice().sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id).map(e => editing === e.id
+      ? `<li><div class="lognew" style="margin:0"><input type="date" id="neDate" value="${new Date(e.created_at).toLocaleDateString("en-CA")}"><textarea id="neText" rows="2">${esc(e.note)}</textarea><span style="display:flex;gap:6px"><button class="btn sm primary" type="button" id="neSave">Save</button><button class="btn sm" type="button" id="neCancel">Cancel</button></span></div></li>`
+      : `<li><b>${new Date(e.created_at).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short", year: "2-digit" })}</b>${staffName(e.created_by_email) ? ` <span class="muted">· ${esc(staffName(e.created_by_email))}</span>` : ""} <span class="logact"><button type="button" class="linkbtn" data-ned="${e.id}">Edit</button><button type="button" class="linkbtn" data-ndl="${e.id}">Delete</button></span><div style="white-space:pre-wrap;color:var(--ink)">${esc(e.note)}</div></li>`).join("") || `<li class="muted">Nothing logged yet.</li>`;
+    ul.querySelectorAll("[data-ned]").forEach(b => b.onclick = () => { editing = +b.dataset.ned; draw(); });
+    ul.querySelectorAll("[data-ndl]").forEach(b => b.onclick = guard(async () => { if (!confirm("Delete this note?")) return; const nid = +b.dataset.ndl; await q(sb.from(table).delete().eq("id", nid)); log = log.filter(e => e.id !== nid); draw(); }));
+    if (editing != null) {
+      ul.querySelector("#neCancel").onclick = () => { editing = null; draw(); };
+      ul.querySelector("#neSave").onclick = guard(async () => { const e = log.find(z => z.id === editing), note = ul.querySelector("#neText").value.trim(), dv = ul.querySelector("#neDate").value; if (!note) throw new Error("Write the note, or use Delete");
+        const upd = { note }; if (dv && dv !== new Date(e.created_at).toLocaleDateString("en-CA")) upd.created_at = new Date(dv + "T12:00:00").toISOString();
+        await q(sb.from(table).update(upd).eq("id", e.id)); Object.assign(e, upd); editing = null; draw(); });
+    }
+  };
+  draw();
+  dr.querySelector("#nlAdd").onclick = guard(async () => { const t = dr.querySelector("#nlText"), note = t.value.trim(); if (!note) return; const dv = dr.querySelector("#nlDate").value || today();
+    const row = { [fk]: fkId, note }; if (dv !== today()) row.created_at = new Date(dv + "T12:00:00").toISOString();
+    const r = await sb.from(table).insert(row).select("*").single(); if (r.error) throw r.error; log.push({ created_at: new Date().toISOString(), ...r.data }); t.value = ""; dr.querySelector("#nlDate").value = today(); draw(); });
+}
+const notesSection = ph => `<div class="section"><h4>Notes log</h4><div class="lognew"><input type="date" id="nlDate" value="${today()}"><textarea id="nlText" rows="2" placeholder="${esc(ph)}"></textarea><button class="btn sm" id="nlAdd" type="button">Add note</button></div><ul class="events log" id="nlList"></ul></div>`;
+async function openCustomer(id) {
+  const c = byId(S.d.customers, id); if (!c) return;
+  const [orders, moves, notes] = await Promise.all([
+    q(sb.from("al_shopify_orders").select("*").eq("customer_id", id).order("ordered_at", { ascending: false })),
+    q(sb.from("al_stock_movements").select("*").eq("customer_id", id).order("moved_at", { ascending: false })),
+    q(sb.from("al_customer_notes").select("*").eq("customer_id", id))]);
+  const bikes = S.d.bikes.filter(b => b.customer_id === id), claims = S.d.claims.filter(x => x.customer_id === id), openC = claims.filter(x => !["closed","rejected"].includes(x.status));
+  const pre = S.d.preorders.filter(p => p.customer_id === id), parts = moves.filter(m => m.qty < 0 && !String(m.reference || "").startsWith("Shopify"));
+  const spent = orders.reduce((a, o) => a + (+o.total_aud || 0), 0) + bikes.filter(b => !orders.length && b.sale_price_aud).reduce((a, b) => a + +b.sale_price_aud, 0) + parts.reduce((a, m) => a + (m.unit_price_aud || 0) * -m.qty, 0);
+  const dr = drawer({ title: c.full_name, wide: true,
+    body: `<div class="small muted">${esc([c.phone, c.email].filter(Boolean).join(" · "))}${fullAddr(c) ? `<br>${esc(fullAddr(c))}` : ""}<br>Customer since ${fdate(String(c.created_at || "").slice(0, 10)) || "—"}</div>
+    <div class="strip s4" style="margin:0"><div class="stat"><div class="n">${bikes.length}</div><div class="l">Bikes</div></div><div class="stat"><div class="n">${money(spent)}</div><div class="l">Spent with us</div></div><div class="stat"><div class="n">${orders.length}</div><div class="l">Online orders</div></div><div class="stat"><div class="n"${openC.length ? ' style="color:var(--red)"' : ""}>${openC.length}/${claims.length}</div><div class="l">Claims open / total</div></div></div>
+    <div class="section"><h4>Bikes</h4>${bikes.length ? `<table style="min-width:0"><tbody>${bikes.map(b => `<tr class="click" data-bk="${b.id}"><td>${esc(bikeLabel(b))}</td><td>${pill(BIKE_ST, b.status)}</td><td class="r">${money(b.sale_price_aud)}</td><td class="small muted">${fdate(b.sold_date)}</td></tr>`).join("")}</tbody></table>` : `<p class="small muted" style="margin:0">No bikes yet.</p>`}</div>
+    ${pre.length ? `<div class="section"><h4>Pre-orders</h4>${pre.map(p => `<div class="small">${esc(model(p.model_id).name)} · ${pill(PRE_ST, p.status)} · deposit ${money(p.deposit_aud)} ${fdate(p.deposit_date)}</div>`).join("")}</div>` : ""}
+    <div class="section"><h4>Online orders</h4>${orders.length ? `<table style="min-width:0"><tbody>${orders.map(o => `<tr><td class="mono">${esc(o.order_name || "")}</td><td class="small">${fdate(String(o.ordered_at || "").slice(0, 10))}</td><td class="r">${money(o.total_aud, 2)}</td><td class="small muted">${[o.bikes_reserved ? o.bikes_reserved + " bike reserved" : "", o.preorders_created ? o.preorders_created + " pre-order" : "", o.parts_lines ? o.parts_lines + " part line(s)" : "", (o.discount_codes || []).length ? "code " + o.discount_codes.join(", ") : ""].filter(Boolean).join(" · ")}</td></tr>`).join("")}</tbody></table>` : `<p class="small muted" style="margin:0">No Shopify orders.</p>`}</div>
+    ${parts.length ? `<div class="section"><h4>Parts bought in store</h4><table style="min-width:0"><tbody>${parts.map(m => `<tr><td class="small">${fdate(m.moved_at)}</td><td>${esc(((byId(S.d.parts, m.part_id) || {}).name || "Part").replace(/^(TECH )?Arctic Leopard /, ""))}</td><td class="r">${-m.qty}</td><td class="r">${money((m.unit_price_aud || 0) * -m.qty, 2)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    <div class="section"><h4>Warranty claims <button class="linkbtn" id="cClaim" type="button">+ Claim for this customer</button></h4>${claims.length ? `<table style="min-width:0"><tbody>${claims.map(x => `<tr class="click" data-c="${x.id}"><td class="mono">${esc(x.claim_no)}</td><td class="small">${esc(claimModel(x))} ${esc(claimFrame(x))}${x.dealer_id ? `<div class="muted">via ${esc(dealerName(x.dealer_id))}</div>` : ""}</td><td>${pill(CLAIM_ST, x.status)}</td><td class="small muted">${fdate(x.opened_at)}</td></tr>`).join("")}</tbody></table>` : `<p class="small muted" style="margin:0">No claims.</p>`}</div>
+    ${notesSection("Calls, emails, what was promised…")}
+    <div class="section"><h4>Details</h4></div>` + fieldsHtml(CUST_F, c),
+    foot: `${delBtn()}<button class="btn primary" id="saveBtn">Save details</button>` });
+  wireNotes(dr, "al_customer_notes", "customer_id", id, notes);
+  dr.querySelectorAll("[data-c]").forEach(r => r.onclick = () => openClaim(+r.dataset.c));
+  dr.querySelectorAll("[data-bk]").forEach(r => r.onclick = () => openBike(+r.dataset.bk));
+  dr.querySelector("#cClaim").onclick = () => openClaim(null, { customer_id: id });
+  dr.querySelector("#saveBtn").onclick = guard(async () => { const row = readFields(CUST_F); if (!row.full_name) throw new Error("A name is needed"); await saveRow("al_customers", id, row); await rerender(); toast("Saved"); openCustomer(id); });
+  armDelete(dr, async () => { await q(sb.from("al_customers").delete().eq("id", id)).catch(() => { throw new Error("This customer is linked to bikes, claims or orders, so it can't be deleted"); }); });
+}
 function openSimple(table, F, id, noun) {
   const key = table === "al_dealers" ? "dealers" : "customers";
   const rec = id ? byId(S.d[key], id) : (table === "al_dealers" ? { status: "prospect" } : {});
