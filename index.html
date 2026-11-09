@@ -215,7 +215,8 @@ async function loadAll() {
   Object.assign(S.d, { models, dealers, customers, shipments, lines, parts, bikes, claims, wparts, preorders, pdi, orders });
 }
 const model = id => byId(S.d.models, id) || {};
-const bikeLabel = b => b ? `${model(b.model_id).name || "Bike"} ${b.frame_no ? "· " + b.frame_no : "· #" + b.id + " (no frame no.)"}` : "";
+const bikeNo = b => S.d.bikes.filter(x => x.model_id === b.model_id && x.id <= b.id).length;
+const bikeLabel = b => b ? `${model(b.model_id).name || "Bike"} #${bikeNo(b)}${b.frame_no ? " · " + b.frame_no : ""}` : "";
 const dealerName = id => (byId(S.d.dealers, id) || {}).business_name || "";
 const claimFrame = c => c.reported_frame_no || (byId(S.d.bikes, c.bike_id) || {}).frame_no || "";
 const claimModel = c => model(c.model_id || (byId(S.d.bikes, c.bike_id) || {}).model_id).name || c.reported_model || "";
@@ -346,7 +347,7 @@ const opt = (map) => Object.entries(map).map(([k, v]) => [k, Array.isArray(v) ? 
 const dealerOpts = () => S.d.dealers.map(x => [x.id, x.business_name]);
 const custOpts = () => S.d.customers.map(x => [x.id, x.full_name + (x.suburb ? " (" + x.suburb + ")" : "")]);
 const modelOpts = () => S.d.models.map(x => [x.id, x.name]);
-const bikeGroups = (filter = () => true) => S.d.models.map(m => [m.name, S.d.bikes.filter(b => b.model_id === m.id && filter(b)).map(b => [b.id, (b.frame_no || "No frame no. yet (#" + b.id + ")") + " · " + (BIKE_ST[b.status] || [b.status])[0] + (b.customer_id ? " · " + custName(b.customer_id) : b.dealer_id ? " · " + dealerName(b.dealer_id) : "")])]).filter(g => g[1].length);
+const bikeGroups = (filter = () => true) => S.d.models.map(m => [m.name, S.d.bikes.filter(b => b.model_id === m.id && filter(b)).map(b => [b.id, m.name + " #" + bikeNo(b) + (b.frame_no ? " · " + b.frame_no : "") + " · " + (BIKE_ST[b.status] || [b.status])[0] + (b.customer_id ? " · " + custName(b.customer_id) : b.dealer_id ? " · " + dealerName(b.dealer_id) : "")])]).filter(g => g[1].length);
 const stateOpts = () => STATES.map(s => [s, s]);
 
 async function saveRow(table, id, row) {
@@ -442,7 +443,7 @@ function openShipment(id) {
     for (const l of ls.filter(l => l.model_id)) {
       const have = bikesIn.filter(b => b.model_id === l.model_id).length;
       const landed = l.unit_usd ? Math.round((l.unit_usd * (s.fx_rate || 1.4243) + 266) * 100) / 100 : null;
-      for (let i = have; i < l.qty; i++) rows.push({ model_id: l.model_id, shipment_id: id, colour: l.spec, landed_cost_aud: landed, status: ["received","arrived"].includes(s.status) ? "in_stock" : "in_transit", notes: landed ? "Landed cost is an estimate: invoice USD x FX + A$266 freight" : null });
+      for (let i = have; i < l.qty; i++) rows.push({ model_id: l.model_id, shipment_id: id, landed_cost_aud: landed, status: ["received","arrived"].includes(s.status) ? "in_stock" : "in_transit", notes: landed ? "Landed cost is an estimate: invoice USD x FX + A$266 freight" : null });
     }
     if (!rows.length) return toast("All bike records already exist");
     await q(sb.from("al_bikes").insert(rows)); await loadAll(); render(); openShipment(id); toast(`${rows.length} bike records created`);
@@ -457,7 +458,7 @@ function openShipment(id) {
       <div class="field full"><label>Description (as on the invoice)</label><input id="nl_d"></div>
       <div class="field"><label>Qty</label><input id="nl_q" type="number" min="1" value="1"></div>
       <div class="field"><label>Unit cost AUD</label><input id="nl_u" type="number" step="any"></div>
-      <div class="field"><label>Spec / colour</label><input id="nl_s"></div>
+      <div class="field"><label>Spec (optional)</label><input id="nl_s"></div>
       <div class="field" style="justify-content:flex-end"><button class="btn primary" id="nl_go">Add line</button></div></div>${partDatalist()}`;
     const t = box.querySelector("#nl_t"); t.onchange = () => { box.querySelector("#nl_mw").hidden = t.value !== "bike"; box.querySelector("#nl_pw").hidden = t.value !== "part"; };
     box.querySelector("#nl_go").onclick = guard(async () => {
@@ -480,26 +481,30 @@ VIEWS.bikes = () => {
   const s = (f.bikeQ || "").toLowerCase();
   let list = d.bikes.filter(b => (!f.bikeModel || b.model_id === +f.bikeModel) && (!f.bikeSt || (f.bikeSt === "in_stock" ? ["in_stock","pdi_done"].includes(b.status) : b.status === f.bikeSt)));
   if (s) list = list.filter(b => [b.frame_no, b.motor_no, b.battery_no, b.colour, b.location, model(b.model_id).name, dealerName(b.dealer_id), custName(b.customer_id)].join(" ").toLowerCase().includes(s));
-  const noFrame = d.bikes.filter(b => !b.frame_no).length;
-  view(`<div class="tools">
-    <div class="search"><input id="bq" type="search" placeholder="Search frame, motor or battery no., customer, dealer" value="${esc(f.bikeQ || "")}"></div>
+  const ST_COLS = [["in_transit","On the water"],["in_stock","In stock"],["reserved","Reserved"],["to_dealer","With dealers"],["sold_retail","Sold retail"],["other","Demo / hold"]];
+  const stGroup = b => b.status === "pdi_done" ? "in_stock" : ["in_transit","in_stock","reserved","to_dealer","sold_retail"].includes(b.status) ? b.status : "other";
+  const sumRows = d.models.map(m => { const bs = d.bikes.filter(b => b.model_id === m.id); const c = {}; bs.forEach(b => { const g = stGroup(b); c[g] = (c[g] || 0) + 1; }); return { m, n: bs.length, c }; }).filter(r => r.n);
+  view(`<div class="tablewrap" style="margin-bottom:16px"><table><thead><tr><th>Model</th>${ST_COLS.map(([, l]) => `<th class="r">${l}</th>`).join("")}<th class="r">Total</th></tr></thead>
+  <tbody>${sumRows.map(r => `<tr class="click" data-model="${r.m.id}"><td><b>${esc(r.m.name)}</b></td>${ST_COLS.map(([k]) => `<td class="r">${r.c[k] || ""}</td>`).join("")}<td class="r"><b>${r.n}</b></td></tr>`).join("")}</tbody></table></div>
+  <p class="hint">Bikes are tracked by model (all black, one spec per model). Frame numbers are optional here; on warranty claims the frame number is typed in as the reference.</p>
+  <div class="tools">
+    <div class="search"><input id="bq" type="search" placeholder="Search customer, dealer, location" value="${esc(f.bikeQ || "")}"></div>
     <select id="bm"><option value="">All models</option>${modelOpts().map(([v, l]) => `<option value="${v}"${String(v) === String(f.bikeModel || "") ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
     <select id="bs"><option value="">All statuses</option>${opt(BIKE_ST).map(([v, l]) => `<option value="${v}"${v === f.bikeSt ? " selected" : ""}>${l}</option>`).join("")}</select>
-    <button class="btn" id="frameBtn">Enter frame numbers${noFrame ? ` (${noFrame} missing)` : ""}</button>
     <button class="btn" id="bikeCsv">Download list</button>
     <button class="btn primary" id="newBike">+ Bike</button></div>
-  <div class="tablewrap"><table><thead><tr><th>Model</th><th>Frame no.</th><th>Motor / battery</th><th>Colour</th><th>Status</th><th>Where / who</th><th class="r">Landed</th><th class="r">Sold for</th><th>Sold</th></tr></thead>
-  <tbody>${list.map(b => { const p = S.d.pdi.find(x => x.bike_id === b.id); return `<tr class="click" data-id="${b.id}"><td>${esc(model(b.model_id).name)}</td><td class="mono">${b.frame_no ? esc(b.frame_no) : `<span class="muted">—</span>`}</td><td class="mono small">${esc(b.motor_no || "")}${b.battery_no ? "<br>" + esc(b.battery_no) : ""}</td><td class="small">${esc(b.colour || "")}</td><td>${pill(BIKE_ST, b.status)}${p && p.completed_at ? ` <span class="tag" title="PDI complete">PDI</span>` : ""}</td><td class="small">${esc(dealerName(b.dealer_id))}${b.dealer_id && b.customer_id ? " · " : ""}${esc(custName(b.customer_id))}${b.location ? `<div class="muted">${esc(b.location)}</div>` : ""}</td><td class="r">${money(b.landed_cost_aud)}</td><td class="r">${money(b.sale_price_aud)}</td><td class="small">${fdate(b.sold_date)}</td></tr>`; }).join("") || `<tr><td colspan="9" class="muted">No bikes match.</td></tr>`}</tbody></table></div>
+  <div class="tablewrap"><table><thead><tr><th>Bike</th><th>Status</th><th>Where / who</th><th class="r">Landed</th><th class="r">Sold for</th><th>Sold</th></tr></thead>
+  <tbody>${list.map(b => { const p = S.d.pdi.find(x => x.bike_id === b.id); return `<tr class="click" data-id="${b.id}"><td>${esc(bikeLabel(b))}</td><td>${pill(BIKE_ST, b.status)}${p && p.completed_at ? ` <span class="tag" title="PDI complete">PDI</span>` : ""}</td><td class="small">${esc(dealerName(b.dealer_id))}${b.dealer_id && b.customer_id ? " · " : ""}${esc(custName(b.customer_id))}${b.location ? `<div class="muted">${esc(b.location)}</div>` : ""}</td><td class="r">${money(b.landed_cost_aud)}</td><td class="r">${money(b.sale_price_aud)}</td><td class="small">${fdate(b.sold_date)}</td></tr>`; }).join("") || `<tr><td colspan="7" class="muted">No bikes match.</td></tr>`}</tbody></table></div>
   <p class="small muted">${list.length} of ${d.bikes.length} bikes</p>`);
   $("#bq").oninput = e => { f.bikeQ = e.target.value; clearTimeout(S.tq); S.tq = setTimeout(() => { VIEWS.bikes(); const i = $("#bq"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 200); };
   $("#bm").onchange = e => { f.bikeModel = e.target.value; VIEWS.bikes(); };
   $("#bs").onchange = e => { f.bikeSt = e.target.value; VIEWS.bikes(); };
   $("#newBike").onclick = () => openBike(null);
-  $("#frameBtn").onclick = openFrameEntry;
-  $("#bikeCsv").onclick = () => downloadXlsx(`AL-bikes-${today()}.xlsx`, [["Bikes", list.map(b => ({ Model: model(b.model_id).name, "Frame no": b.frame_no, "Motor no": b.motor_no, "Battery no": b.battery_no, Colour: b.colour, Status: (BIKE_ST[b.status] || [b.status])[0], Dealer: dealerName(b.dealer_id), Customer: custName(b.customer_id), Location: b.location, "Landed AUD": b.landed_cost_aud, "Sold for AUD": b.sale_price_aud, "Sold date": b.sold_date, Notes: b.notes }))]]);
+  document.querySelectorAll("tr[data-model]").forEach(r => r.onclick = () => { f.bikeModel = r.dataset.model; VIEWS.bikes(); });
+  $("#bikeCsv").onclick = () => downloadXlsx(`AL-bikes-${today()}.xlsx`, [["Bikes", list.map(b => ({ Bike: bikeLabel(b), Model: model(b.model_id).name, Status: (BIKE_ST[b.status] || [b.status])[0], Dealer: dealerName(b.dealer_id), Customer: custName(b.customer_id), Location: b.location, "Landed AUD": b.landed_cost_aud, "Sold for AUD": b.sale_price_aud, "Sold date": b.sold_date, Notes: b.notes }))]]);
   document.querySelectorAll("tr[data-id]").forEach(r => r.onclick = () => openBike(+r.dataset.id));
 };
-const BIKE_F = () => [["model_id","Model","select",{options:modelOpts(),blank:false,int:1}],["status","Status","select",{options:opt(BIKE_ST),blank:false}],["frame_no","Frame (VIN) no."],["colour","Colour / spec"],["motor_no","Motor no."],["battery_no","Battery no."],["location","Location",'text',{ph:"e.g. Balcatta shop"}],["landed_cost_aud","Landed cost AUD","number"],["dealer_id","Dealer","select",{options:dealerOpts(),int:1}],["customer_id","Customer (retail buyer or end rider)","select",{options:custOpts(),int:1}],["sale_price_aud","Sold for AUD (inc GST)","number"],["sold_date","Sold date","date"],["delivered_date","Delivered date","date"],["shipment_id","Shipment","select",{options:S.d.shipments.map(s => [s.id, s.ref]),int:1}],["notes","Notes","textarea"]];
+const BIKE_F = () => [["model_id","Model","select",{options:modelOpts(),blank:false,int:1}],["status","Status","select",{options:opt(BIKE_ST),blank:false}],["frame_no","Frame no. (optional)"],["location","Location",'text',{ph:"e.g. Balcatta shop"}],["landed_cost_aud","Landed cost AUD","number"],["dealer_id","Dealer","select",{options:dealerOpts(),int:1}],["customer_id","Customer (retail buyer or end rider)","select",{options:custOpts(),int:1}],["sale_price_aud","Sold for AUD (inc GST)","number"],["sold_date","Sold date","date"],["delivered_date","Delivered date","date"],["shipment_id","Shipment","select",{options:S.d.shipments.map(s => [s.id, s.ref]),int:1}],["notes","Notes","textarea"]];
 const PDI_F = [["unpacked","Unpacked, checked for transit damage"],["assembled","Assembled (bars, wheel, fender)"],["charged","Battery fully charged"],["torque_checked","Torque check all fasteners"],["brakes_bled","Brakes checked or bled"],["suspension_set","Suspension set for rider"],["test_ridden","Test ridden"],["photos_taken","Photos and serials recorded"]];
 function openBike(id) {
   const b = id ? byId(S.d.bikes, id) : { status: "in_stock", model_id: S.d.models[0]?.id };
@@ -663,7 +668,7 @@ async function openClaim(id, preset) {
   const fr = dr.querySelector("#f_reported_frame_no"), fm = dr.querySelector("#frameMatch");
   fr.parentElement.appendChild(fm);
   const matchFrame = () => { const v = fr.value.trim().toLowerCase(); const b = v && S.d.bikes.find(x => (x.frame_no || "").toLowerCase() === v);
-    fm.innerHTML = !v ? "" : b ? `Matches our ${esc(model(b.model_id).name)}${b.customer_id ? " sold to " + esc(custName(b.customer_id)) : b.dealer_id ? " sent to " + esc(dealerName(b.dealer_id)) : ""}` : "Not one of our bikes (fine for Global Bike or other stock)";
+    fm.innerHTML = !v ? "" : b ? `Matches our ${esc(model(b.model_id).name)}${b.customer_id ? " sold to " + esc(custName(b.customer_id)) : b.dealer_id ? " sent to " + esc(dealerName(b.dealer_id)) : ""}` : "Saved as the reference for this claim";
     if (b) { if (!$("#f_model_id").value) $("#f_model_id").value = b.model_id; if (b.customer_id && !$("#f_customer_id").value) $("#f_customer_id").value = b.customer_id; if (b.sold_date && !$("#f_purchase_date").value) $("#f_purchase_date").value = b.sold_date; if (!$("#f_purchased_from").value) $("#f_purchased_from").value = b.dealer_id ? dealerName(b.dealer_id) : "Arctic Leopard Australia"; } };
   fr.oninput = matchFrame; matchFrame();
   dr.querySelector("#saveBtn").onclick = guard(async () => {
@@ -775,7 +780,7 @@ function openSimple(table, F, id, noun) {
   dr.querySelector("#saveBtn").onclick = guard(async () => { const row = readFields(F); if (!(row.business_name || row.full_name)) throw new Error("A name is needed"); await saveRow(table, id, row); closeDrawer(); await rerender(); toast("Saved"); });
   armDelete(dr, async () => { await q(sb.from(table).delete().eq("id", id)).catch(() => { throw new Error(`This ${noun} is linked to bikes, claims or stock records, so it can't be deleted`); }); });
 }
-const PRE_F = () => [["status","Status","select",{options:opt(PRE_ST),blank:false}],["model_id","Model","select",{options:modelOpts(),blank:false,int:1}],["customer_id","Customer","select",{options:custOpts(),int:1}],["dealer_id","Or dealer","select",{options:dealerOpts(),int:1}],["colour","Colour / spec"],["agreed_price_aud","Agreed price AUD","number"],["deposit_aud","Deposit AUD","number"],["deposit_date","Deposit date","date"],["shopify_order","Shopify order no."],["bike_id","Allocated bike","select",{groups:bikeGroups(b => ["in_transit","in_stock","pdi_done","reserved"].includes(b.status)),int:1,full:1}],["notes","Notes","textarea"]];
+const PRE_F = () => [["status","Status","select",{options:opt(PRE_ST),blank:false}],["model_id","Model","select",{options:modelOpts(),blank:false,int:1}],["customer_id","Customer","select",{options:custOpts(),int:1}],["dealer_id","Or dealer","select",{options:dealerOpts(),int:1}],["agreed_price_aud","Agreed price AUD","number"],["deposit_aud","Deposit AUD","number"],["deposit_date","Deposit date","date"],["shopify_order","Shopify order no."],["bike_id","Allocated bike","select",{groups:bikeGroups(b => ["in_transit","in_stock","pdi_done","reserved"].includes(b.status)),int:1,full:1}],["notes","Notes","textarea"]];
 VIEWS.preorders = () => {
   const d = S.d;
   view(`<div class="tools"><p class="hint" style="margin:0;flex:1">Deposits taken ahead of bikes landing. Allocating a bike marks it Reserved for that customer.</p><button class="btn primary" id="newP">+ Pre-order</button></div>
