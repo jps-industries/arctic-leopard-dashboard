@@ -1,5 +1,6 @@
 // Public warranty claim form -> Arctic Leopard dashboard (claim status New, source web_form).
 // Called from claim.html (multipart/form-data). No login: validated, size-limited, honeypot for bots.
+// Emails (when the RESEND_API_KEY secret is set): a confirmation to the customer and an alert to the team.
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
@@ -10,6 +11,17 @@ const CATS = ["motor","battery","controller","charger","suspension","brakes","fr
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "content-type, apikey, authorization, x-client-info" };
 const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { ...cors, "content-type": "application/json" } });
 const like = (v: string) => v.replace(/[\\%_]/g, (c) => "\\" + c);
+const RESEND = Deno.env.get("RESEND_API_KEY") ?? "";
+const FROM = "Arctic Leopard Australia <contact@arcticleopardaustralia.com>", TEAM = "contact@arcticleopardaustralia.com";
+const DASH = "https://jps-industries.github.io/arctic-leopard-dashboard/";
+const h = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+async function sendMail(to: string, subject: string, html: string, replyTo = TEAM) {
+  if (!RESEND) return;
+  try {
+    const r = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${RESEND}`, "content-type": "application/json" }, body: JSON.stringify({ from: FROM, to: [to], reply_to: replyTo, subject, html }) });
+    if (!r.ok) console.error("email", r.status, (await r.text()).slice(0, 300));
+  } catch (e) { console.error("email", e); }
+}
 const clip = (v: FormDataEntryValue | null, n: number) => (typeof v === "string" ? v.trim().slice(0, n) : "") || null;
 
 Deno.serve(async (req) => {
@@ -84,7 +96,17 @@ Deno.serve(async (req) => {
       if (up.error) { console.error(up.error); continue; }
       await db.from("al_warranty_media").insert({ claim_id: claim.data.id, storage_path: path, caption });
     }
-    return json({ ok: true, claim_no: claim.data.claim_no });
+    const no = claim.data.claim_no;
+    const rows: [string, unknown][] = [["Claim number", no], ["Name", name], ["Phone", phone], ["Email", email], ["Address", `${addr.address}, ${addr.suburb} ${addr.state} ${addr.postcode}`],
+      ["Model", modelName], ["Frame (VIN) number", frame], ["Hours or km", hoursKm], ["Purchase date", purchase], ["Invoice or receipt no.", invoiceNo], ["Bought from", boughtFrom],
+      ["Problem", problem], ["Files", `${proof.length} proof of purchase, ${files.length} photo/video`]];
+    const table = `<table style="border-collapse:collapse;font:14px/1.5 Arial,sans-serif">${rows.map(([k, v]) => `<tr><td style="padding:4px 12px 4px 0;color:#666;vertical-align:top;white-space:nowrap">${h(k)}</td><td style="padding:4px 0;white-space:pre-wrap">${h(v)}</td></tr>`).join("")}</table>`;
+    const wrap = (body: string) => `<div style="font:15px/1.5 Arial,sans-serif;color:#111;max-width:600px">${body}</div>`;
+    await Promise.all([
+      sendMail(email, `Warranty claim ${no} received`, wrap(`<p>Hi ${h(name.split(" ")[0])},</p><p>Thanks, we've received your warranty claim. Your claim number is <b>${h(no)}</b>. We'll review it and get back to you.</p><p>Keep your bike stored safely and don't ride it if it isn't safe to. If you need to add anything, just reply to this email and quote your claim number.</p>${table}<p style="margin-top:20px">The Arctic Leopard Australia Team<br>0457 416 969 · contact@arcticleopardaustralia.com</p>`)),
+      sendMail(TEAM, `New warranty claim ${no}: ${modelName} · ${name}`, wrap(`<p>A new warranty claim came in from the website.</p>${table}<p><a href="${DASH}">Open the dashboard</a> (Warranty tab) to see the proof of purchase, photos and video.</p>`), email),
+    ]);
+    return json({ ok: true, claim_no: no });
   } catch (e) {
     console.error(e);
     return json({ error: "Something went wrong saving your claim. Please try again or email us." }, 500);
