@@ -153,6 +153,28 @@ tr.sel td{background:var(--accent-soft)}td.selc{cursor:default}td.selc input,#se
   .form,.checks{grid-template-columns:1fr}
   .tools select{flex:1 1 40%;max-width:none}
   .pline{grid-template-columns:1fr 60px 28px}.pline .ps,.pline .pst{grid-column:span 1}
+  .band{margin-bottom:12px}.top{padding:12px 0 10px}
+  .tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;overflow:visible;border:1px solid var(--line);background:var(--surface)}
+  .tabs button{justify-content:center;padding:8px 4px;min-height:42px;font-size:11px;letter-spacing:.05em;white-space:normal;text-align:center;line-height:1.2;border-bottom-width:2px;gap:5px;border-right:1px solid var(--line);border-top:1px solid var(--line);margin:-1px 0 0 0}
+  .tabs button:nth-child(3n){border-right:0}
+  .tabs button[aria-pressed="true"]{background:var(--accent-soft)}
+  .tools>*{flex:1 1 auto}.tools .search,.tools .hint{flex:1 1 100%!important}
+  .tablewrap{overflow:visible}
+  table.mc{min-width:0!important}
+  table.mc thead{display:none}
+  table.mc tr{display:block;padding:10px 12px;border-bottom:1px solid var(--line)}
+  table.mc tr:last-child{border-bottom:0}
+  table.mc td{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;border:0;padding:3px 0;text-align:right;min-width:0;white-space:normal}
+  table.mc td>*{min-width:0}
+  table.mc td::before{content:attr(data-l);flex:0 0 auto;max-width:42%;text-align:left;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding-top:3px}
+  table.mc td.mt{display:block;text-align:left;font-size:15px;padding-bottom:6px}
+  table.mc td.mt::before,table.mc td[data-l=""]::before{display:none}
+  table.mc td[colspan]{display:block;text-align:left}
+  table.mc td:empty,table.mc td.emp{display:none}
+  table.mc td .mv{min-width:0;overflow-wrap:anywhere}
+  .strip>:last-child:nth-child(odd){grid-column:span 2}
+  table.mc td.selc{float:right;padding:2px 0 0 10px}
+  table.mc td.selc input{width:20px;height:20px}
 }
 </style>
 </head>
@@ -304,7 +326,22 @@ function render() {
   document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { S.tab = b.dataset.tab; localSet("al.tab", S.tab); render(); });
   (VIEWS[S.tab] || VIEWS.overview)();
 }
-const view = html => { $("#view").innerHTML = html; };
+const view = html => { const v = $("#view"); v.innerHTML = html; mobileLabels(v); };
+// Phone layout: tables become cards. Each cell gets its column name as a label; the first real column is the card title.
+function mobileLabels(root) {
+  root.querySelectorAll("table").forEach(t => {
+    const heads = [...t.querySelectorAll("thead th")].map(th => th.textContent.trim());
+    if (!heads.length) return;
+    t.classList.add("mc");
+    t.querySelectorAll("tbody tr").forEach(tr => { let i = 0, titled = false;
+      for (const td of tr.children) { const span = +td.getAttribute("colspan") || 1; td.dataset.l = span > 1 ? "" : heads[i] || "";
+        if (!titled && !td.classList.contains("selc") && span === 1 && td.textContent.trim()) { td.classList.add("mt"); titled = true; }
+        else if (span === 1 && !td.classList.contains("selc")) {
+          if (!td.textContent.trim() && !td.querySelector("input,select,img,button")) td.classList.add("emp");
+          else { const w = document.createElement("div"); w.className = "mv"; w.append(...td.childNodes); td.append(w); } }
+        i += span; } });
+  });
+}
 const rerender = async () => { await loadAll(); render(); };
 
 /* ---------- drawer ---------- */
