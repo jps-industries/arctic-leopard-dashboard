@@ -21,16 +21,24 @@ Deno.serve(async (req) => {
 
   const name = clip(f.get("name"), 120), email = clip(f.get("email"), 160)?.toLowerCase() ?? null, phone = clip(f.get("phone"), 40);
   const frame = clip(f.get("frame_no"), 60), problem = clip(f.get("problem"), 4000);
+  const modelName = clip(f.get("model"), 60), hoursKm = clip(f.get("hours_km"), 40), purchase = clip(f.get("purchase_date"), 10);
+  const invoiceNo = clip(f.get("invoice_no"), 60), boughtFrom = clip(f.get("purchased_from"), 120), cat = clip(f.get("category"), 20);
   const addr = { address: clip(f.get("address"), 200), suburb: clip(f.get("suburb"), 80), state: clip(f.get("state"), 3), postcode: clip(f.get("postcode"), 8) };
   if (!name || !email || !phone || !frame || !problem) return json({ error: "Please fill in your name, email, phone, frame number and the problem." }, 400);
   if (!addr.address || !addr.suburb || !addr.state || !addr.postcode) return json({ error: "Please fill in your full address so we can send parts if needed." }, 400);
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "That email address doesn't look right." }, 400);
+  if (!modelName || !hoursKm || !cat) return json({ error: "Please fill in your model, hours or km ridden and the problem area." }, 400);
+  if (!purchase || !/^\d{4}-\d{2}-\d{2}$/.test(purchase) || !invoiceNo || !boughtFrom) return json({ error: "Please fill in your purchase date, invoice or receipt number and where you bought the bike." }, 400);
   if (f.get("consent") !== "yes") return json({ error: "Please tick the box to confirm the details are correct." }, 400);
 
+  const proof = f.getAll("proof").filter((x): x is File => x instanceof File && x.size > 0);
   const files = f.getAll("files").filter((x): x is File => x instanceof File && x.size > 0);
+  if (!proof.length) return json({ error: "Please attach your invoice or receipt." }, 400);
+  if (proof.length > 3) return json({ error: "Please attach 3 proof of purchase files or fewer." }, 400);
+  if (!files.length) return json({ error: "Please attach at least one photo or video of the problem." }, 400);
   if (files.length > MAX_FILES) return json({ error: `Please attach ${MAX_FILES} files or fewer.` }, 400);
   let total = 0;
-  for (const file of files) {
+  for (const file of [...proof, ...files]) {
     total += file.size;
     if (file.size > MAX_FILE) return json({ error: `${file.name} is over 25 MB.` }, 400);
     if (!ALLOWED.test(file.type)) return json({ error: `${file.name} isn't a photo, video or PDF.` }, 400);
@@ -59,25 +67,22 @@ Deno.serve(async (req) => {
     const b = await db.from("al_bikes").select("id,dealer_id,sold_date").ilike("frame_no", like(frame)).limit(1);
     if (b.error) throw b.error;
     const bike = b.data[0];
-    const modelName = clip(f.get("model"), 60);
     const m = modelName ? await db.from("al_models").select("id").ilike("name", like(modelName)).limit(1) : { data: [] as { id: number }[] };
-    const cat = clip(f.get("category"), 20);
-    const purchase = clip(f.get("purchase_date"), 10);
     const claim = await db.from("al_warranty_claims").insert({
       source: "web_form", status: "new", model_id: m.data?.[0]?.id ?? null, customer_id: customerId, bike_id: bike?.id ?? null, dealer_id: bike?.dealer_id ?? null,
-      purchase_date: purchase && /^\d{4}-\d{2}-\d{2}$/.test(purchase) ? purchase : bike?.sold_date ?? null,
-      hours_km: clip(f.get("hours_km"), 40), category: cat && CATS.includes(cat) ? cat : null, problem,
-      reported_frame_no: frame, reported_model: clip(f.get("model"), 60), purchased_from: clip(f.get("purchased_from"), 120),
+      purchase_date: purchase, invoice_no: invoiceNo,
+      hours_km: hoursKm, category: cat && CATS.includes(cat) ? cat : null, problem,
+      reported_frame_no: frame, reported_model: modelName, purchased_from: boughtFrom,
       ship_address: `${addr.address}, ${addr.suburb} ${addr.state} ${addr.postcode}`,
     }).select("id,claim_no").single();
     if (claim.error) throw claim.error;
 
     let n = 0;
-    for (const file of files) {
-      const path = `${claim.data.claim_no}/web-${Date.now()}-${n++}-${file.name.replace(/[^\w.\-]+/g, "_").slice(-80)}`;
+    for (const [file, caption, tag] of [...proof.map((x) => [x, "Proof of purchase", "proof"] as const), ...files.map((x) => [x, "Photo or video from customer", "web"] as const)]) {
+      const path = `${claim.data.claim_no}/${tag}-${Date.now()}-${n++}-${file.name.replace(/[^\w.\-]+/g, "_").slice(-80)}`;
       const up = await db.storage.from(BUCKET).upload(path, file, { contentType: file.type });
       if (up.error) { console.error(up.error); continue; }
-      await db.from("al_warranty_media").insert({ claim_id: claim.data.id, storage_path: path, caption: "Uploaded by customer" });
+      await db.from("al_warranty_media").insert({ claim_id: claim.data.id, storage_path: path, caption });
     }
     return json({ ok: true, claim_no: claim.data.claim_no });
   } catch (e) {

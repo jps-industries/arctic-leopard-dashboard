@@ -8,6 +8,7 @@
 <style>
 :root{--bg:#0d1117;--panel:#171717;--ink:#ffffff;--muted:#999999;--line:#3A3737;--accent:#D7191F;--accent-hi:#EC3238;--err:#ff6b6b;--ok:#6fd38a}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Inter,"Helvetica Neue",Helvetica,Arial,sans-serif}
 body{padding:16px}
 form,.done{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
@@ -32,7 +33,7 @@ button:disabled{opacity:.6;cursor:default}
 .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
 .done{border:1px solid var(--line);border-left:4px solid var(--accent);padding:20px;border-radius:4px}
 .done h2{margin:0;font-size:22px}
-#fileList{font-size:13px;color:var(--muted)}
+.files{font-size:13px;color:var(--muted)}
 @media (max-width:600px){fieldset{grid-template-columns:1fr}}
 </style>
 </head>
@@ -40,7 +41,7 @@ button:disabled{opacity:.6;cursor:default}
 <form id="claim" novalidate>
   <div>
     <h1>Warranty claim</h1>
-    <p class="lead">Tell us about the problem and attach your proof of purchase plus photos or a short video. We'll review it and get back to you.</p>
+    <p class="lead">Tell us about the problem and attach your proof of purchase plus photos or a short video. All fields are required. We'll review it and get back to you.</p>
   </div>
   <fieldset>
     <legend>Your details</legend>
@@ -54,17 +55,22 @@ button:disabled{opacity:.6;cursor:default}
   </fieldset>
   <fieldset>
     <legend>Your bike</legend>
-    <div class="f"><label for="model">Model</label><select id="model" name="model"><option value="">Select</option><option>XE Pro R</option><option>XE Pro S</option><option>XF Pro MX</option><option>EZ Pro</option><option>EAT 600 Trial</option><option>EXE 880 Enduro</option><option>E 20X</option><option>E 16X</option><option>Other</option></select></div>
+    <div class="f"><label for="model">Model <b>*</b></label><select id="model" name="model" required><option value="">Select</option><option>XE Pro R</option><option>XE Pro S</option><option>XF Pro MX</option><option>EZ Pro</option><option>EAT 600 Trial</option><option>EXE 880 Enduro</option><option>E 20X</option><option>E 16X</option><option>Other</option></select></div>
     <div class="f"><label for="frame_no">Frame (VIN) number <b>*</b></label><input id="frame_no" name="frame_no" required><span class="hint">Stamped on the steering head and on your invoice.</span></div>
-    <div class="f"><label for="purchase_date">Purchase date</label><input id="purchase_date" name="purchase_date" type="date"></div>
-    <div class="f"><label for="purchased_from">Bought from</label><input id="purchased_from" name="purchased_from" placeholder="Arctic Leopard Australia or dealer name"></div>
-    <div class="f"><label for="hours_km">Hours or km ridden</label><input id="hours_km" name="hours_km"></div>
+    <div class="f"><label for="hours_km">Hours or km ridden <b>*</b></label><input id="hours_km" name="hours_km" required></div>
+  </fieldset>
+  <fieldset>
+    <legend>Proof of purchase</legend>
+    <div class="f"><label for="purchase_date">Purchase date <b>*</b></label><input id="purchase_date" name="purchase_date" type="date" required></div>
+    <div class="f"><label for="invoice_no">Invoice or receipt number <b>*</b></label><input id="invoice_no" name="invoice_no" required></div>
+    <div class="f full"><label for="purchased_from">Where you bought it <b>*</b></label><input id="purchased_from" name="purchased_from" required placeholder="Arctic Leopard Australia, or the dealer or shop name"></div>
+    <div class="f full"><label for="proof">Invoice or receipt <b>*</b></label><input id="proof" name="proof" type="file" multiple required accept="image/*,application/pdf"><span class="hint">A photo, screenshot or PDF showing the seller, date and frame number. Up to 3 files.</span><div class="files" id="proofList"></div></div>
   </fieldset>
   <fieldset>
     <legend>The problem</legend>
-    <div class="f"><label for="category">Area</label><select id="category" name="category"><option value="">Not sure</option><option value="motor">Motor</option><option value="battery">Battery</option><option value="controller">Controller</option><option value="charger">Charger</option><option value="electrical">Electrical / display / wiring</option><option value="brakes">Brakes</option><option value="suspension">Suspension</option><option value="drivetrain">Chain / sprockets</option><option value="frame">Frame</option><option value="plastics">Plastics</option><option value="other">Other</option></select></div>
+    <div class="f"><label for="category">Area <b>*</b></label><select id="category" name="category" required><option value="">Select</option><option value="unsure">Not sure</option><option value="motor">Motor</option><option value="battery">Battery</option><option value="controller">Controller</option><option value="charger">Charger</option><option value="electrical">Electrical / display / wiring</option><option value="brakes">Brakes</option><option value="suspension">Suspension</option><option value="drivetrain">Chain / sprockets</option><option value="frame">Frame</option><option value="plastics">Plastics</option><option value="other">Other</option></select></div>
     <div class="f full"><label for="problem">What's happening? <b>*</b></label><textarea id="problem" name="problem" required placeholder="When it started, what you were doing, any error codes on the display, and anything you've already tried."></textarea></div>
-    <div class="f full"><label for="files">Proof of purchase, photos and video</label><input id="files" name="files" type="file" multiple accept="image/*,video/*,application/pdf"><span class="hint">Up to 10 files, 25 MB each. Please include your invoice or receipt.</span><div id="fileList"></div></div>
+    <div class="f full"><label for="files">Photos or video of the problem <b>*</b></label><input id="files" name="files" type="file" multiple required accept="image/*,video/*"><span class="hint">Up to 10 files, 25 MB each.</span><div class="files" id="fileList"></div></div>
   </fieldset>
   <div class="hp" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
   <label class="check"><input type="checkbox" id="consent" name="consent" value="yes"> The details above are true and correct, and I agree to Arctic Leopard Australia using them to assess this claim.</label>
@@ -80,20 +86,24 @@ const ENDPOINT = "https://dobonmovezqepjgzfwmt.supabase.co/functions/v1/al-warra
 const f = document.getElementById("claim"), err = document.getElementById("err"), go = document.getElementById("go");
 function postHeight() { try { parent.postMessage({ alClaimHeight: document.documentElement.scrollHeight }, "*"); } catch (e) {} }
 new ResizeObserver(postHeight).observe(document.body);
-document.getElementById("files").onchange = e => {
+for (const [inp, list] of [["files", "fileList"], ["proof", "proofList"]]) document.getElementById(inp).onchange = e => {
   const fs = [...e.target.files];
-  document.getElementById("fileList").textContent = fs.length ? fs.map(x => x.name).join(", ") : "";
+  document.getElementById(list).textContent = fs.length ? fs.map(x => x.name).join(", ") : "";
 };
 f.onsubmit = async e => {
   e.preventDefault(); err.textContent = "";
-  for (const id of ["name", "phone", "email", "address", "suburb", "state", "postcode", "frame_no", "problem"]) {
+  for (const id of ["name", "phone", "email", "address", "suburb", "state", "postcode", "model", "frame_no", "hours_km", "purchase_date", "invoice_no", "purchased_from", "category", "problem"]) {
     const el = document.getElementById(id);
-    if (!el.value.trim()) { err.textContent = "Please fill in the fields marked *."; el.focus(); return; }
+    if (!el.value.trim()) { err.textContent = "Please fill in every field."; el.focus(); return; }
   }
+  const proof = document.getElementById("proof").files;
+  if (!proof.length) { err.textContent = "Please attach your invoice or receipt."; return; }
+  if (proof.length > 3) { err.textContent = "Please attach 3 proof of purchase files or fewer."; return; }
+  if (!document.getElementById("files").files.length) { err.textContent = "Please attach at least one photo or video of the problem."; return; }
   if (!document.getElementById("consent").checked) { err.textContent = "Please tick the box to confirm the details are correct."; return; }
   const files = document.getElementById("files").files;
   if (files.length > 10) { err.textContent = "Please attach 10 files or fewer."; return; }
-  for (const x of files) if (x.size > 25 * 1024 * 1024) { err.textContent = `${x.name} is over 25 MB.`; return; }
+  for (const x of [...files, ...proof]) if (x.size > 25 * 1024 * 1024) { err.textContent = `${x.name} is over 25 MB.`; return; }
   go.disabled = true; go.textContent = "Sending…";
   try {
     const r = await fetch(ENDPOINT, { method: "POST", body: new FormData(f) });
