@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="AL Desk">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23000'/%3E%3Ctext x='32' y='42' font-family='Impact,Arial Narrow,sans-serif' font-size='30' fill='%23e8eaea' text-anchor='middle' font-style='italic'%3EAL%3C/text%3E%3Crect y='58' width='64' height='6' fill='%233AA0D8'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23000'/%3E%3Ctext x='32' y='42' font-family='Impact,Arial Narrow,sans-serif' font-size='30' fill='%23e8eaea' text-anchor='middle' font-style='italic'%3EAL%3C/text%3E%3Crect y='58' width='64' height='6' fill='%23D7191F'/%3E%3C/svg%3E">
 <title>Arctic Leopard Desk</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,7 +15,7 @@
 <style>
 :root{
   --ground:#F3F4F5; --surface:#FFFFFF; --surface-2:#F7F8F9; --raise:#EEF0F2; --ink:#0B0B0C; --muted:#5C6368; --faint:#8C9399;
-  --line:#E1E4E7; --line-strong:#C6CBD0; --accent:#3AA0D8; --accent-hi:#58B3E4; --accent-dark:#1B6F9E; --accent-ink:#001826; --accent-soft:rgba(58,160,216,.12);
+  --line:#E1E4E7; --line-strong:#C6CBD0; --accent:#D7191F; --accent-hi:#EC3238; --accent-dark:#A80F14; --accent-ink:#FFFFFF; --accent-soft:rgba(215,25,31,.10);
   --band:#000; --band-ink:#FAFAFA; --band-muted:#A9A9A9; --band-line:#252525;
   --chrome:linear-gradient(180deg,#FFFFFF 0%,#E4E6E8 34%,#8A9096 50%,#D5D8DB 66%,#FFFFFF 84%,#AEB3B8 100%);
   --red:#CF3A31; --red-bg:#FCE8E6; --amber:#B07212; --amber-bg:#FBF0DC; --green:#2F7D1A; --green-bg:#E7F3DF;
@@ -191,6 +191,7 @@ const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g," ") : 
 const money = (v, d=0) => v == null || v === "" ? "" : "$" + Number(v).toLocaleString("en-AU",{minimumFractionDigits:d,maximumFractionDigits:d});
 const num = v => v == null ? "" : Number(v).toLocaleString("en-AU");
 const fdate = d => d ? new Date(d + (String(d).length === 10 ? "T00:00:00" : "")).toLocaleDateString("en-AU",{day:"numeric",month:"short",year:"2-digit"}) : "";
+const aud = (usd, fx) => usd == null ? null : Math.round(usd * (fx || 1.4243) * 100) / 100;
 const today = () => new Date().toLocaleDateString("en-CA");
 const pill = (map, k) => { const m = map[k] || [cap(k),"--grey"]; return `<span class="pill" style="--pc:var(${m[1]});--pb:var(${m[1]}-bg)">${esc(m[0])}</span>`; };
 const byId = (arr, id) => arr.find(x => x.id === id);
@@ -287,7 +288,32 @@ function drawer({ title, body, wide, foot }) {
   document.body.append(sc, dr);
   sc.onclick = closeDrawer; dr.querySelector(".x").onclick = closeDrawer;
   document.addEventListener("keydown", escClose);
+  setTimeout(() => attachNewCustomer(dr));
   return dr;
+}
+function attachNewCustomer(dr) {
+  dr.querySelectorAll('select[id$="customer_id"]').forEach(sel => {
+    const lab = sel.parentElement.querySelector("label"); if (!lab || lab.querySelector(".linkbtn")) return;
+    lab.style.display = "flex"; lab.style.justifyContent = "space-between";
+    lab.insertAdjacentHTML("beforeend", `<button type="button" class="linkbtn" style="text-transform:none;letter-spacing:0">+ New customer</button>`);
+    lab.querySelector(".linkbtn").onclick = e => {
+      e.preventDefault(); if (sel.parentElement.querySelector(".ncbox")) return;
+      sel.insertAdjacentHTML("afterend", `<div class="ncbox" style="border:1px solid var(--line-strong);background:var(--surface-2);padding:10px;display:flex;flex-direction:column;gap:8px">
+        <input placeholder="Full name" data-n="full_name"><div style="display:flex;gap:8px"><input placeholder="Phone" data-n="phone"><input placeholder="Email" data-n="email" type="email"></div>
+        <div style="display:flex;gap:8px"><input placeholder="Suburb" data-n="suburb"><select data-n="state"><option value="">State</option>${STATES.map(x => `<option>${x}</option>`).join("")}</select></div>
+        <div style="display:flex;gap:8px"><button type="button" class="btn sm primary" data-add>Add customer</button><button type="button" class="btn sm ghost" data-cancel>Cancel</button></div></div>`);
+      const box = sel.parentElement.querySelector(".ncbox");
+      box.querySelector("[data-cancel]").onclick = () => box.remove();
+      box.querySelector("[data-add]").onclick = guard(async () => {
+        const row = {}; box.querySelectorAll("[data-n]").forEach(x => row[x.dataset.n] = x.value.trim() || null);
+        if (!row.full_name) throw new Error("Customer name is needed");
+        const r = await q(sb.from("al_customers").insert(row).select().single());
+        S.d.customers.push(r); S.d.customers.sort((a, b) => a.full_name.localeCompare(b.full_name));
+        dr.querySelectorAll('select[id$="customer_id"]').forEach(x => x.insertAdjacentHTML("beforeend", `<option value="${r.id}">${esc(r.full_name)}</option>`));
+        sel.value = r.id; box.remove(); toast("Customer added");
+      });
+    };
+  });
 }
 function escClose(e) { if (e.key === "Escape") closeDrawer(); }
 function closeDrawer() { $("#drawer")?.remove(); $("#scrim")?.remove(); document.removeEventListener("keydown", escClose); }
@@ -299,7 +325,7 @@ function fieldsHtml(fields, rec, prefix = "f_") {
     const id = prefix + k, full = opts.full || type === "textarea" ? " full" : "";
     let input;
     if (type === "textarea") input = `<textarea id="${id}">${esc(v)}</textarea>`;
-    else if (type === "select") input = `<select id="${id}">${opts.blank !== false ? `<option value="">${esc(opts.blank || "—")}</option>` : ""}${opts.options.map(([ov, ol]) => `<option value="${esc(ov)}"${String(ov) === String(v) ? " selected" : ""}>${esc(ol)}</option>`).join("")}</select>`;
+    else if (type === "select") input = `<select id="${id}">${opts.blank !== false ? `<option value="">${esc(opts.blank || "—")}</option>` : ""}${(opts.groups || [["", opts.options]]).map(([gl, os]) => (gl ? `<optgroup label="${esc(gl)}">` : "") + os.map(([ov, ol]) => `<option value="${esc(ov)}"${String(ov) === String(v) ? " selected" : ""}>${esc(ol)}</option>`).join("") + (gl ? "</optgroup>" : "")).join("")}</select>`;
     else if (type === "check") input = `<label class="checkrow"><input type="checkbox" id="${id}"${v ? " checked" : ""}> ${esc(opts.text || "")}</label>`;
     else input = `<input id="${id}" type="${type}"${type === "number" ? ` step="${opts.step || "any"}"` : ""} value="${esc(v)}"${opts.ph ? ` placeholder="${esc(opts.ph)}"` : ""}${opts.list ? ` list="${opts.list}"` : ""}>`;
     return `<div class="field${full}"><label for="${id}">${esc(label)}</label>${input}</div>`;
@@ -318,6 +344,7 @@ const opt = (map) => Object.entries(map).map(([k, v]) => [k, Array.isArray(v) ? 
 const dealerOpts = () => S.d.dealers.map(x => [x.id, x.business_name]);
 const custOpts = () => S.d.customers.map(x => [x.id, x.full_name + (x.suburb ? " (" + x.suburb + ")" : "")]);
 const modelOpts = () => S.d.models.map(x => [x.id, x.name]);
+const bikeGroups = (filter = () => true) => S.d.models.map(m => [m.name, S.d.bikes.filter(b => b.model_id === m.id && filter(b)).map(b => [b.id, (b.frame_no || "No frame no. yet (#" + b.id + ")") + " · " + (BIKE_ST[b.status] || [b.status])[0] + (b.customer_id ? " · " + custName(b.customer_id) : b.dealer_id ? " · " + dealerName(b.dealer_id) : "")])]).filter(g => g[1].length);
 const stateOpts = () => STATES.map(s => [s, s]);
 
 async function saveRow(table, id, row) {
@@ -353,7 +380,7 @@ VIEWS.overview = () => {
     <div class="panel"><h3>Open warranty claims <small>${openClaims.length}</small></h3>
       ${openClaims.length ? `<table><tbody>${openClaims.slice(0, 8).map(c => `<tr class="click" data-claim="${c.id}"><td class="mono">${esc(c.claim_no)}</td><td>${esc(custName(c.customer_id) || "—")}<div class="small muted">${esc(bikeLabel(byId(d.bikes, c.bike_id)))}</div></td><td>${pill(CLAIM_ST, c.status)}</td><td class="small muted">${fdate(c.opened_at)}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">No open claims.</div>`}</div>
     <div class="panel"><h3>Shipments on the way <small>${ships.length}</small></h3>
-      ${ships.length ? `<table><tbody>${ships.map(s => `<tr class="click" data-ship="${s.id}"><td>${esc(s.ref)}<div class="small muted">${esc(s.pi_number || "")}</div></td><td>${pill(SHIP_ST, s.status)}</td><td class="small">${s.eta ? "ETA " + fdate(s.eta) : `<span class="muted">No ETA</span>`}</td><td class="r small">US${money(s.usd_total)}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">Nothing on the water.</div>`}</div>
+      ${ships.length ? `<table><tbody>${ships.map(s => `<tr class="click" data-ship="${s.id}"><td>${esc(s.ref)}<div class="small muted">${esc(s.pi_number || "")}</div></td><td>${pill(SHIP_ST, s.status)}</td><td class="small">${s.eta ? "ETA " + fdate(s.eta) : `<span class="muted">No ETA</span>`}</td><td class="r small">${money(aud(s.usd_total, s.fx_rate))}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">Nothing on the water.</div>`}</div>
     <div class="panel"><h3>Pre-orders waiting for a bike <small>${pres.length}</small></h3>
       ${pres.length ? `<table><tbody>${pres.map(p => `<tr class="click" data-pre="${p.id}"><td>${esc(custName(p.customer_id) || dealerName(p.dealer_id) || "—")}</td><td>${esc(model(p.model_id).name)}</td><td class="r">${money(p.deposit_aud)}</td><td>${pill(PRE_ST, p.status)}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">No pre-orders waiting.</div>`}</div>
   </div>`);
@@ -368,27 +395,35 @@ VIEWS.overview = () => {
    ====================================================================== */
 VIEWS.shipments = () => {
   const d = S.d;
-  view(`<div class="tools"><p class="hint" style="margin:0;flex:1">Containers and air freight from the factory. Marking one received moves its bikes to stock and adds its parts to stock.</p><button class="btn primary" id="newShip">+ New shipment</button></div>
-  <div class="tablewrap"><table><thead><tr><th>Shipment</th><th>Type</th><th>Status</th><th>Invoice</th><th>ETA</th><th class="r">Items</th><th class="r">USD</th><th class="r">AUD (ex freight)</th></tr></thead>
-  <tbody>${d.shipments.map(s => { const ls = d.lines.filter(l => l.shipment_id === s.id); const qty = ls.reduce((a, l) => a + l.qty, 0); return `<tr class="click" data-id="${s.id}"><td><b>${esc(s.ref)}</b><div class="small muted mono">${esc(s.pi_number || "")}</div></td><td>${cap(s.kind)}</td><td>${pill(SHIP_ST, s.status)}</td><td>${fdate(s.invoice_date)}</td><td>${s.eta ? fdate(s.eta) : `<span class="muted">—</span>`}</td><td class="r">${qty}</td><td class="r">${money(s.usd_total)}</td><td class="r">${money((s.usd_total || 0) * (s.fx_rate || 0))}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">No shipments yet.</td></tr>`}</tbody></table></div>`);
+  view(`<div class="tools"><p class="hint" style="margin:0;flex:1">Containers and air freight from the factory. Setting a shipment to Received moves all its bikes into stock and adds every part line that's linked to a part into stock. Lines marked Not linked (e.g. BMS units, chargers) need adding by hand.</p><button class="btn primary" id="newShip">+ New shipment</button></div>
+  <div class="tablewrap"><table><thead><tr><th>Shipment</th><th>Type</th><th>Status</th><th>Invoice</th><th>ETA</th><th class="r">Items</th><th class="r">Invoice AUD</th><th class="r">Landed AUD</th></tr></thead>
+  <tbody>${d.shipments.map(s => { const ls = d.lines.filter(l => l.shipment_id === s.id); const qty = ls.reduce((a, l) => a + l.qty, 0); return `<tr class="click" data-id="${s.id}"><td><b>${esc(s.ref)}</b><div class="small muted mono">${esc(s.pi_number || "")}</div></td><td>${cap(s.kind)}</td><td>${pill(SHIP_ST, s.status)}</td><td>${fdate(s.invoice_date)}</td><td>${s.eta ? fdate(s.eta) : `<span class="muted">—</span>`}</td><td class="r">${qty}</td><td class="r">${money(aud(s.usd_total, s.fx_rate))}</td><td class="r">${money((aud(s.usd_total, s.fx_rate) || 0) + (s.freight_aud || 0) + (s.duty_aud || 0))}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">No shipments yet.</td></tr>`}</tbody></table></div>`);
   $("#newShip").onclick = () => openShipment(null);
   document.querySelectorAll("tr[data-id]").forEach(r => r.onclick = () => openShipment(+r.dataset.id));
 };
-const SHIP_F = [["ref","Name"],["pi_number","PI / invoice no."],["kind","Type","select",{options:[["bikes","Bikes"],["parts","Parts"],["mixed","Mixed"]],blank:false}],["freight_mode","Freight","select",{options:[["sea","Sea"],["air","Air"],["courier","Courier"]]}],["status","Status","select",{options:opt(SHIP_ST),blank:false}],["invoice_date","Invoice date","date"],["eta","ETA","date"],["arrived_at","Arrived","date"],["usd_total","Invoice total USD","number"],["fx_rate","FX rate (AUD per USD)","number"],["freight_aud","Freight AUD","number"],["duty_aud","Duty and fees AUD","number"],["notes","Notes","textarea"]];
+const SHIP_F = [["ref","Name"],["pi_number","PI / invoice no."],["kind","Type","select",{options:[["bikes","Bikes"],["parts","Parts"],["mixed","Mixed"]],blank:false}],["freight_mode","Freight","select",{options:[["sea","Sea"],["air","Air"],["courier","Courier"]]}],["status","Status","select",{options:opt(SHIP_ST),blank:false}],["invoice_date","Invoice date","date"],["eta","ETA","date"],["arrived_at","Arrived","date"],["invoice_aud","Invoice total AUD","number"],["fx_rate","Exchange rate used (AUD per USD)","number"],["freight_aud","Freight AUD","number"],["duty_aud","Duty and fees AUD","number"],["notes","Notes","textarea"]];
 function openShipment(id) {
   const s = id ? byId(S.d.shipments, id) : { kind: "bikes", status: "ordered", fx_rate: 1.4243 };
   const ls = id ? S.d.lines.filter(l => l.shipment_id === id) : [];
   const bikesIn = id ? S.d.bikes.filter(b => b.shipment_id === id) : [];
   const partName = pid => (byId(S.d.parts, pid) || {}).name || "";
   const linesHtml = id ? `<div class="section"><h4>Lines <span><button class="btn sm" id="addLine">+ Add line</button></span></h4>
-    <table><thead><tr><th>Item</th><th>Linked to</th><th class="r">Qty</th><th class="r">Unit USD</th><th class="r">Recv</th><th></th></tr></thead><tbody>
-    ${ls.map(l => `<tr><td>${esc(l.description)}${l.spec ? `<div class="small muted">${esc(l.spec)}</div>` : ""}${l.notes ? `<div class="small" style="color:var(--amber)">${esc(l.notes)}</div>` : ""}</td><td class="small">${l.model_id ? esc(model(l.model_id).name) : l.part_id ? esc(partName(l.part_id).replace(/^(TECH )?Arctic Leopard /, "")) : `<span class="muted">Not linked</span>`}</td><td class="r">${l.qty}</td><td class="r">${money(l.unit_usd, 2)}</td><td class="r">${l.part_id ? l.qty_received : l.model_id ? "" : ""}</td><td><button class="rm" data-rml="${l.id}" title="Remove line">×</button></td></tr>`).join("")}
+    <table><thead><tr><th>Item</th><th>Linked to</th><th class="r">Qty</th><th class="r">Unit AUD</th><th class="r">Recv</th><th></th></tr></thead><tbody>
+    ${ls.map(l => `<tr><td>${esc(l.description)}${l.spec ? `<div class="small muted">${esc(l.spec)}</div>` : ""}${l.notes ? `<div class="small" style="color:var(--amber)">${esc(l.notes)}</div>` : ""}</td><td class="small">${l.model_id ? esc(model(l.model_id).name) : l.part_id ? esc(partName(l.part_id).replace(/^(TECH )?Arctic Leopard /, "")) : `<span class="muted">Not linked</span>`}</td><td class="r">${l.qty}</td><td class="r">${money(aud(l.unit_usd, s.fx_rate), 2)}</td><td class="r">${l.part_id ? l.qty_received : l.model_id ? "" : ""}</td><td><button class="rm" data-rml="${l.id}" title="Remove line">×</button></td></tr>`).join("")}
     </tbody></table>
     <div id="lineForm" hidden></div>
     <p class="small muted" style="margin:0">${bikesIn.length} bike records on this shipment. ${ls.some(l => l.model_id) ? `<button class="linkbtn" id="mkBikes">Create missing bike records from the lines</button>` : ""}</p></div>` : `<p class="small muted">Save the shipment first, then add its lines.</p>`;
+  s.invoice_aud = aud(s.usd_total, s.fx_rate);
   const dr = drawer({ title: id ? s.ref : "New shipment", wide: true, body: fieldsHtml(SHIP_F, s) + linesHtml,
     foot: `${id ? delBtn() : "<span></span>"}<span style="display:flex;gap:8px">${id && s.status !== "received" ? `<button class="btn" id="recvBtn">Mark received</button>` : ""}<button class="btn primary" id="saveBtn">Save</button></span>` });
-  dr.querySelector("#saveBtn").onclick = guard(async () => { const row = readFields(SHIP_F); if (!row.ref) throw new Error("Give the shipment a name"); const r = await saveRow("al_shipments", id, row); toast("Saved"); await loadAll(); render(); if (!id) openShipment(r.id); else closeDrawer(); });
+  dr.querySelector("#saveBtn").onclick = guard(async () => {
+    const row = readFields(SHIP_F); if (!row.ref) throw new Error("Give the shipment a name");
+    row.fx_rate ||= 1.4243; row.usd_total = row.invoice_aud == null ? null : Math.round(row.invoice_aud / row.fx_rate * 100) / 100; delete row.invoice_aud;
+    const receiving = id && row.status === "received" && s.status !== "received";
+    if (receiving) row.status = s.status;
+    const r = await saveRow("al_shipments", id, row);
+    if (receiving) { const x = await q(sb.rpc("al_receive_shipment", { p_shipment_id: id, p_date: row.arrived_at || today() })); closeDrawer(); await rerender(); return toast(`Received: ${x.bikes} bikes to stock, ${x.parts} parts added`); }
+    toast("Saved"); await loadAll(); render(); if (!id) openShipment(r.id); else closeDrawer(); });
   armDelete(dr, async () => { if (bikesIn.length) throw new Error("Move or delete its bike records first"); await q(sb.from("al_shipments").delete().eq("id", id)); });
   const rb = dr.querySelector("#recvBtn");
   if (rb) rb.onclick = guard(async () => {
@@ -417,12 +452,12 @@ function openShipment(id) {
       <div class="field full" id="nl_pw" hidden><label>Part</label><input id="nl_p" list="partList" placeholder="Start typing a part name"></div>
       <div class="field full"><label>Description (as on the invoice)</label><input id="nl_d"></div>
       <div class="field"><label>Qty</label><input id="nl_q" type="number" min="1" value="1"></div>
-      <div class="field"><label>Unit USD</label><input id="nl_u" type="number" step="any"></div>
+      <div class="field"><label>Unit cost AUD</label><input id="nl_u" type="number" step="any"></div>
       <div class="field"><label>Spec / colour</label><input id="nl_s"></div>
       <div class="field" style="justify-content:flex-end"><button class="btn primary" id="nl_go">Add line</button></div></div>${partDatalist()}`;
     const t = box.querySelector("#nl_t"); t.onchange = () => { box.querySelector("#nl_mw").hidden = t.value !== "bike"; box.querySelector("#nl_pw").hidden = t.value !== "part"; };
     box.querySelector("#nl_go").onclick = guard(async () => {
-      const row = { shipment_id: id, description: box.querySelector("#nl_d").value.trim(), qty: +box.querySelector("#nl_q").value, unit_usd: box.querySelector("#nl_u").value ? +box.querySelector("#nl_u").value : null, spec: box.querySelector("#nl_s").value.trim() || null };
+      const row = { shipment_id: id, description: box.querySelector("#nl_d").value.trim(), qty: +box.querySelector("#nl_q").value, unit_usd: box.querySelector("#nl_u").value ? Math.round(+box.querySelector("#nl_u").value / (s.fx_rate || 1.4243) * 100) / 100 : null, spec: box.querySelector("#nl_s").value.trim() || null };
       if (t.value === "bike") { row.model_id = +box.querySelector("#nl_m").value; row.description ||= model(row.model_id).name; }
       if (t.value === "part") { const p = partFromInput(box.querySelector("#nl_p").value); if (!p) throw new Error("Pick a part from the list"); row.part_id = p.id; row.description ||= p.name; }
       if (!row.description || !(row.qty > 0)) throw new Error("Add a description and quantity");
@@ -467,7 +502,7 @@ function openBike(id) {
   const p = (id && S.d.pdi.find(x => x.bike_id === id)) || {};
   const claims = id ? S.d.claims.filter(c => c.bike_id === id) : [];
   const dr = drawer({ title: id ? bikeLabel(b) : "New bike", wide: true,
-    body: `<p class="hint" style="margin:0">To sell retail: pick the customer (add them under Customers first), set status to Sold retail, the price and date. To send to a dealer: pick the dealer, set status to With dealer, the dealer price and date.</p>` + fieldsHtml(BIKE_F(), b) +
+    body: `<p class="hint" style="margin:0">To sell retail: pick or add the customer, set status to Sold retail, the price and date. To send to a dealer: pick the dealer, set status to With dealer, the dealer price and date.</p>` + fieldsHtml(BIKE_F(), b) +
       `<div class="section"><h4>Pre-delivery inspection ${p.completed_at ? `<span class="tag">Done ${fdate(p.completed_at)}</span>` : ""}</h4><div class="checks">${PDI_F.map(([k, l]) => `<label><input type="checkbox" id="pdi_${k}"${p[k] ? " checked" : ""}> ${esc(l)}</label>`).join("")}</div>
       <div class="form"><div class="field"><label for="pdi_by">Done by</label><input id="pdi_by" value="${esc(p.completed_by || "")}"></div><div class="field"><label for="pdi_notes">PDI notes</label><input id="pdi_notes" value="${esc(p.notes || "")}"></div></div></div>` +
       (claims.length ? `<div class="section"><h4>Warranty claims</h4>${claims.map(c => `<div><button class="linkbtn" data-c="${c.id}">${esc(c.claim_no)}</button> ${pill(CLAIM_ST, c.status)} <span class="small">${esc(c.problem.slice(0, 80))}</span></div>`).join("")}</div>` : ""),
@@ -538,7 +573,7 @@ VIEWS.parts = () => {
   $("#partXlsx").onclick = () => downloadXlsx(`AL-parts-stock-${today()}.xlsx`, [["Parts", list.map(p => ({ Part: p.name, Series: p.series, "On hand": p.on_hand, "On order": p.on_order, "Warranty pending": p.warranty_pending, "Reorder at": p.reorder_level, "RRP AUD": p.rrp_aud, "Dealer AUD": p.dealer_price_aud, "Landed AUD": p.landed_cost_aud, "Stock value AUD": Math.max(p.on_hand, 0) * (p.landed_cost_aud || 0) }))]]);
   document.querySelectorAll("tr[data-id]").forEach(r => r.onclick = () => openPart(+r.dataset.id));
 };
-const PART_F = [["name","Name","text",{full:1}],["series","Series","select",{options:[["XE","XE"],["XF","XF"],["XE/XF","XE/XF"]]}],["sku","SKU"],["rrp_aud","RRP AUD (inc GST)","number"],["landed_cost_aud","Landed cost AUD","number"],["us_retail_usd","US retail USD","number"],["factory_cost_usd","Factory cost USD","number"],["reorder_level","Reorder when at or below","number",{int:1}],["shopify_product_id","Shopify product ID"],["notes","Notes","textarea"]];
+const PART_F = [["name","Name","text",{full:1}],["series","Series","select",{options:[["XE","XE"],["XF","XF"],["XE/XF","XE/XF"]]}],["sku","SKU"],["rrp_aud","RRP AUD (inc GST)","number"],["landed_cost_aud","Landed cost AUD","number"],["reorder_level","Reorder when at or below","number",{int:1}],["shopify_product_id","Shopify product ID"],["notes","Notes","textarea"]];
 async function openPart(id) {
   const p = id ? byId(S.d.parts, id) : { reorder_level: 0 };
   const moves = id ? await q(sb.from("al_stock_movements").select("*").eq("part_id", id).order("moved_at", { ascending: false }).order("id", { ascending: false })) : [];
@@ -549,7 +584,7 @@ async function openPart(id) {
         <div class="field"><label for="mv_k">What happened</label><select id="mv_k">${Object.entries(MOVE_KINDS).map(([k, [l]]) => `<option value="${k}">${l}</option>`).join("")}</select></div>
         <div class="field"><label for="mv_q">Qty</label><input id="mv_q" type="number" step="1" value="1"></div>
         <div class="field" id="mv_dw" hidden><label for="mv_d">Dealer</label><select id="mv_d"><option value="">—</option>${dealerOpts().map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("")}</select></div>
-        <div class="field" id="mv_cw" hidden><label for="mv_c">Customer</label><select id="mv_c"><option value="">—</option>${custOpts().map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("")}</select></div>
+        <div class="field" id="mv_cw" hidden><label for="mv_customer_id">Customer</label><select id="mv_customer_id"><option value="">—</option>${custOpts().map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("")}</select></div>
         <div class="field"><label for="mv_p">Unit price AUD</label><input id="mv_p" type="number" step="any"></div>
         <div class="field"><label for="mv_r">Reference (order no., invoice)</label><input id="mv_r"></div>
         <div class="field"><label for="mv_dt">Date</label><input id="mv_dt" type="date" value="${today()}"></div>
@@ -566,7 +601,7 @@ async function openPart(id) {
       const sign = MOVE_KINDS[k.value][1]; let n = Math.trunc(+$("#mv_q").value); if (!n) throw new Error("Enter a quantity");
       if (sign) n = Math.abs(n) * sign;
       if (k.value === "to_dealer" && !$("#mv_d").value) throw new Error("Pick the dealer");
-      await q(sb.from("al_stock_movements").insert({ part_id: id, qty: n, kind: k.value, dealer_id: $("#mv_d").value ? +$("#mv_d").value : null, customer_id: $("#mv_c").value ? +$("#mv_c").value : null, unit_price_aud: $("#mv_p").value ? +$("#mv_p").value : null, reference: $("#mv_r").value.trim() || null, moved_at: $("#mv_dt").value || today() }));
+      await q(sb.from("al_stock_movements").insert({ part_id: id, qty: n, kind: k.value, dealer_id: $("#mv_d").value ? +$("#mv_d").value : null, customer_id: $("#mv_customer_id").value ? +$("#mv_customer_id").value : null, unit_price_aud: $("#mv_p").value ? +$("#mv_p").value : null, reference: $("#mv_r").value.trim() || null, moved_at: $("#mv_dt").value || today() }));
       await loadAll(); render(); openPart(id); toast("Recorded");
     });
   }
@@ -596,16 +631,15 @@ VIEWS.warranty = () => {
   $("#expBtn").onclick = openExport;
   document.querySelectorAll("tr[data-id]").forEach(r => r.onclick = () => openClaim(+r.dataset.id));
 };
-const CLAIM_F = () => [["status","Status","select",{options:opt(CLAIM_ST),blank:false}],["opened_at","Opened","date",{def:today()}],["bike_id","Bike","select",{options:S.d.bikes.filter(b => b.frame_no || b.customer_id).map(b => [b.id, bikeLabel(b) + (b.customer_id ? " — " + custName(b.customer_id) : "")]),blank:"Pick the bike (needs a frame no.)",int:1,full:1}],["customer_id","Customer","select",{options:custOpts(),int:1}],["dealer_id","Sold by dealer","select",{options:dealerOpts(),blank:"Sold by us",int:1}],["purchase_date","Purchase date","date"],["hours_km","Hours / km"],["category","Fault area","select",{options:CATS.map(c => [c, cap(c)])}],["factory_ref","Factory claim ref."],["problem","Problem (what the customer reports)","textarea"],["diagnosis","Diagnosis (what we found)","textarea"],["notes","Internal notes","textarea"]];
+const CLAIM_F = () => [["status","Status","select",{options:opt(CLAIM_ST),blank:false}],["opened_at","Opened","date",{def:today()}],["bike_id","Bike","select",{groups:bikeGroups(),blank:"Pick the bike",int:1,full:1}],["customer_id","Customer","select",{options:custOpts(),int:1}],["dealer_id","Sold by dealer","select",{options:dealerOpts(),blank:"Sold by us",int:1}],["purchase_date","Purchase date","date"],["hours_km","Hours / km"],["category","Fault area","select",{options:CATS.map(c => [c, cap(c)])}],["factory_ref","Factory claim ref."],["problem","Problem (what the customer reports)","textarea"],["diagnosis","Diagnosis (what we found)","textarea"],["notes","Internal notes","textarea"]];
 async function openClaim(id, preset) {
   const c = id ? byId(S.d.claims, id) : Object.assign({ status: "new", opened_at: today() }, preset || {});
   let wp = id ? S.d.wparts.filter(w => w.claim_id === id).map(w => ({ ...w })) : [];
   const [events, media] = id ? await Promise.all([q(sb.from("al_warranty_events").select("*").eq("claim_id", id).order("created_at")), q(sb.from("al_warranty_media").select("*").eq("claim_id", id).order("id"))]) : [[], []];
   let urls = {};
   if (media.length) { const r = await sb.storage.from(BUCKET).createSignedUrls(media.map(m => m.storage_path), 3600); (r.data || []).forEach((u, i) => urls[media[i].id] = u.signedUrl); }
-  const custBlock = `<div class="section"><h4>Customer not in the list? <button class="linkbtn" id="newCust" type="button">+ New customer</button></h4><div id="ncBox" hidden>${fieldsHtml(CUST_F, {}, "nc_")}<div style="margin-top:8px"><button class="btn sm primary" id="ncSave" type="button">Add customer</button></div></div></div>`;
   const dr = drawer({ title: id ? `Claim ${c.claim_no}` : "New warranty claim", wide: true,
-    body: fieldsHtml(CLAIM_F(), c) + custBlock +
+    body: fieldsHtml(CLAIM_F(), c) +
       `<div class="section"><h4>Parts needed <button class="linkbtn" id="addWp" type="button">+ Add part</button></h4>${partDatalist()}<div class="plines" id="wpList"></div>
       <p class="small muted" style="margin:0">"From factory" parts go on the factory request. "From our stock" parts come out of stock when marked Fitted.</p></div>` +
       (id ? `<div class="section"><h4>Photos and video <label class="btn sm" style="cursor:pointer">Upload<input type="file" id="upl" accept="image/*,video/*" multiple hidden></label></h4><div class="media">${media.map(m => `<a href="${esc(urls[m.id] || "#")}" target="_blank" rel="noopener" style="${/\.(jpe?g|png|webp|gif|heic)$/i.test(m.storage_path) && urls[m.id] ? `background-image:url('${esc(urls[m.id])}')` : ""}"><span>${esc(m.storage_path.split("/").pop())}</span></a>`).join("") || `<span class="small muted">None yet.</span>`}</div></div>
@@ -622,13 +656,6 @@ async function openClaim(id, preset) {
   // bike -> fill customer/dealer/purchase date
   const bsel = dr.querySelector("#f_bike_id");
   bsel.onchange = () => { const b = byId(S.d.bikes, +bsel.value); if (!b) return; if (b.customer_id && !$("#f_customer_id").value) $("#f_customer_id").value = b.customer_id; if (b.dealer_id && !$("#f_dealer_id").value) $("#f_dealer_id").value = b.dealer_id; if (b.sold_date && !$("#f_purchase_date").value) $("#f_purchase_date").value = b.sold_date; };
-  dr.querySelector("#newCust").onclick = () => { dr.querySelector("#ncBox").hidden = false; };
-  dr.querySelector("#ncSave").onclick = guard(async () => {
-    const row = readFields(CUST_F, "nc_"); if (!row.full_name) throw new Error("Customer name is needed");
-    const r = await q(sb.from("al_customers").insert(row).select().single()); S.d.customers.push(r); S.d.customers.sort((a, b) => a.full_name.localeCompare(b.full_name));
-    const sel = $("#f_customer_id"); sel.insertAdjacentHTML("beforeend", `<option value="${r.id}">${esc(r.full_name)}</option>`); sel.value = r.id;
-    dr.querySelector("#ncBox").hidden = true; toast("Customer added");
-  });
   dr.querySelector("#saveBtn").onclick = guard(async () => {
     const row = readFields(CLAIM_F());
     if (!row.problem) throw new Error("Describe the problem");
@@ -733,7 +760,7 @@ function openSimple(table, F, id, noun) {
   dr.querySelector("#saveBtn").onclick = guard(async () => { const row = readFields(F); if (!(row.business_name || row.full_name)) throw new Error("A name is needed"); await saveRow(table, id, row); closeDrawer(); await rerender(); toast("Saved"); });
   armDelete(dr, async () => { await q(sb.from(table).delete().eq("id", id)).catch(() => { throw new Error(`This ${noun} is linked to bikes, claims or stock records, so it can't be deleted`); }); });
 }
-const PRE_F = () => [["status","Status","select",{options:opt(PRE_ST),blank:false}],["model_id","Model","select",{options:modelOpts(),blank:false,int:1}],["customer_id","Customer","select",{options:custOpts(),int:1}],["dealer_id","Or dealer","select",{options:dealerOpts(),int:1}],["colour","Colour / spec"],["agreed_price_aud","Agreed price AUD","number"],["deposit_aud","Deposit AUD","number"],["deposit_date","Deposit date","date"],["shopify_order","Shopify order no."],["bike_id","Allocated bike","select",{options:S.d.bikes.filter(b => ["in_transit","in_stock","pdi_done","reserved"].includes(b.status)).map(b => [b.id, bikeLabel(b) + " (" + BIKE_ST[b.status][0] + ")"]),int:1}],["notes","Notes","textarea"]];
+const PRE_F = () => [["status","Status","select",{options:opt(PRE_ST),blank:false}],["model_id","Model","select",{options:modelOpts(),blank:false,int:1}],["customer_id","Customer","select",{options:custOpts(),int:1}],["dealer_id","Or dealer","select",{options:dealerOpts(),int:1}],["colour","Colour / spec"],["agreed_price_aud","Agreed price AUD","number"],["deposit_aud","Deposit AUD","number"],["deposit_date","Deposit date","date"],["shopify_order","Shopify order no."],["bike_id","Allocated bike","select",{groups:bikeGroups(b => ["in_transit","in_stock","pdi_done","reserved"].includes(b.status)),int:1,full:1}],["notes","Notes","textarea"]];
 VIEWS.preorders = () => {
   const d = S.d;
   view(`<div class="tools"><p class="hint" style="margin:0;flex:1">Deposits taken ahead of bikes landing. Allocating a bike marks it Reserved for that customer.</p><button class="btn primary" id="newP">+ Pre-order</button></div>
@@ -744,7 +771,7 @@ VIEWS.preorders = () => {
 };
 function openPreorder(id) {
   const p = id ? byId(S.d.preorders, id) : { status: "deposit_paid", deposit_date: today() };
-  const dr = drawer({ title: id ? "Pre-order" : "New pre-order", body: `<p class="hint" style="margin:0">Add the customer under Customers first if they're new.</p>` + fieldsHtml(PRE_F(), p), foot: `${id ? delBtn() : "<span></span>"}<button class="btn primary" id="saveBtn">Save</button>` });
+  const dr = drawer({ title: id ? "Pre-order" : "New pre-order", body: fieldsHtml(PRE_F(), p), foot: `${id ? delBtn() : "<span></span>"}<button class="btn primary" id="saveBtn">Save</button>` });
   dr.querySelector("#saveBtn").onclick = guard(async () => {
     const row = readFields(PRE_F());
     if (row.bike_id) { const b = byId(S.d.bikes, row.bike_id); if (b.model_id !== row.model_id) throw new Error("That bike is a different model"); if (row.status === "deposit_paid" || row.status === "enquiry") row.status = "allocated"; }
