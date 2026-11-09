@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
       if (part.length) {
         must(await db.from("al_stock_movements").insert({
           part_id: part[0].id, qty: -qty, kind: dealerId ? "to_dealer" : "sold_retail",
-          dealer_id: dealerId, customer_id: customerId, unit_price_aud: unit, reference: ref, moved_at: date,
+          dealer_id: dealerId, customer_id: customerId, unit_price_aud: unit, reference: ref, moved_at: date, paid_date: date,
         }));
         partsLines++;
         partsAud += (unit || 0) * qty - (li.discount_allocations || []).reduce((t: number, d: { amount?: string }) => t + (Number(d.amount) || 0), 0);
@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
             if (b.length) { bike = b[0]; break; }
           }
           if (bike) {
-            must(await db.from("al_bikes").update({ status: "reserved", customer_id: customerId, dealer_id: dealerId, sale_price_aud: unit, notes: `Reserved by ${ref} (was ${bike.status}). Confirm frame no. at delivery.` }).eq("id", bike.id));
+            must(await db.from("al_bikes").update({ status: "reserved", customer_id: customerId, dealer_id: dealerId, sale_price_aud: unit, paid_date: date, notes: `Reserved by ${ref} (was ${bike.status}). Confirm frame no. at delivery.` }).eq("id", bike.id));
             must(await db.from("al_preorders").insert({ customer_id: customerId, dealer_id: dealerId, model_id: model[0].id, agreed_price_aud: unit, deposit_aud: unit, deposit_date: date, bike_id: bike.id, status: "allocated", shopify_order: order.name, notes: "Paid online" }));
             bikes++;
           } else {
