@@ -1,4 +1,5 @@
 // Shopify "Order payment" webhook -> Arctic Leopard dashboard.
+// Discount codes are saved on the order so affiliate / creator codes count sales and commission.
 // Parts come out of stock, the customer is created or matched (or the dealer, by email),
 // bike orders reserve the next in-stock bike of that model (or become a pre-order if none).
 // Signed with AL_SHOPIFY_CLIENT_SECRET when the webhook is registered by the dashboard's Shopify app,
@@ -38,7 +39,9 @@ Deno.serve(async (req) => {
   const seen = must(await db.from("al_shopify_orders").select("shopify_order_id").eq("shopify_order_id", orderId).maybeSingle());
   if (seen) return new Response("already processed");
   // Claim the order id first so a parallel retry can't double-process it.
-  const claim = await db.from("al_shopify_orders").insert({ shopify_order_id: orderId, order_name: order.name, email: (order.email || "").toLowerCase() || null, ordered_at: order.created_at, total_aud: Number(order.total_price) || null });
+  const claim = await db.from("al_shopify_orders").insert({ shopify_order_id: orderId, order_name: order.name, email: (order.email || "").toLowerCase() || null, ordered_at: order.created_at, total_aud: Number(order.total_price) || null,
+    subtotal_aud: order.subtotal_price != null ? Number(order.subtotal_price) : null,
+    discount_codes: (order.discount_codes || []).map((d: { code?: string }) => String(d.code || "").trim().toUpperCase()).filter(Boolean) });
   if (claim.error) return new Response("already processing");
 
   try {
@@ -65,7 +68,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    let partsLines = 0, bikes = 0, preorders = 0;
+    let partsLines = 0, bikes = 0, preorders = 0, partsAud = 0;
     const unmatched: unknown[] = [];
     const ref = `Shopify ${order.name}`;
     const date = (order.processed_at || order.created_at || new Date().toISOString()).slice(0, 10);
@@ -86,6 +89,7 @@ Deno.serve(async (req) => {
           dealer_id: dealerId, customer_id: customerId, unit_price_aud: unit, reference: ref, moved_at: date,
         }));
         partsLines++;
+        partsAud += (unit || 0) * qty - (li.discount_allocations || []).reduce((t: number, d: { amount?: string }) => t + (Number(d.amount) || 0), 0);
         continue;
       }
 
@@ -113,7 +117,7 @@ Deno.serve(async (req) => {
       unmatched.push({ title: li.title, qty, sku, product_id: pid, reason: "not in dashboard" });
     }
 
-    must(await db.from("al_shopify_orders").update({ customer_id: customerId, dealer_id: dealerId, parts_lines: partsLines, bikes_reserved: bikes, preorders_created: preorders, unmatched }).eq("shopify_order_id", orderId));
+    must(await db.from("al_shopify_orders").update({ customer_id: customerId, dealer_id: dealerId, parts_lines: partsLines, bikes_reserved: bikes, preorders_created: preorders, parts_aud: Math.round(partsAud * 100) / 100, unmatched }).eq("shopify_order_id", orderId));
     return new Response("ok");
   } catch (e) {
     // Let Shopify retry: remove the claim row so the retry can process it.

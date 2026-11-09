@@ -182,7 +182,13 @@ const CLAIM_ST = {new:["New","--red"],assessing:["Assessing","--amber"],parts_re
 const DEALER_ST = {prospect:["Prospect","--amber"],active:["Active","--green"],paused:["Paused","--grey"],ended:["Ended","--grey"]};
 const PRE_ST = {enquiry:["Enquiry","--grey"],deposit_paid:["Deposit paid","--amber"],allocated:["Bike allocated","--blue"],delivered:["Delivered","--green"],cancelled:["Cancelled","--grey"],refunded:["Refunded","--grey"]};
 const LOAN_KIND = {demo:"Demo bike",collab:"Collab / content",ambassador:"Ambassador / rider",event:"Event or show",media:"Media / review",staff:"Staff use"};
-const LOAN_ST = {planned:["Planned","--grey"],out:["Out","--blue"],returned:["Returned","--green"],gifted:["Kept / gifted","--purple"]};
+const TIERS = {
+  affiliate: { label: "1 · Affiliate (no bike)", kind: "collab", status: "out", flat: 300, pct: 10, agreement: "Affiliate code only, no bike. Their code gives followers A$250 off a bike or 10% off parts. Commission A$300 per bike + 10% of parts orders using the code, paid monthly." },
+  creator: { label: "2 · Creator (25% off a bike)", kind: "collab", status: "gifted", off: 25, flat: 300, pct: 10, agreement: "Bike at 25% off the store price. 1 full review video + 4 reels within 3 months, tagging @arctic_leopard_australia, with usage rights for our ads. Code commission A$300 per bike + 10% of parts orders." },
+  ambassador: { label: "3 · Ambassador (bike at cost)", kind: "ambassador", status: "gifted", off: "cost", flat: 400, pct: 10, agreement: "Bike at landed cost. Monthly content for 12 months + 2 events or ride days. Code commission A$400 per bike + 10% of parts orders. If content stops, the discount is paid back pro-rata." },
+  review_loan: { label: "4 · Review loan (free, 2-4 weeks)", kind: "media", status: "out", days: 28, flat: 300, pct: 10, agreement: "Free loan for 2-4 weeks for a review. Return it, or buy it at the Creator price (25% off). Code commission A$300 per bike + 10% of parts orders." },
+};
+const LOAN_ST = {planned:["Planned","--grey"],out:["Out","--blue"],returned:["Returned","--green"],gifted:["Kept by them (sold or gifted)","--purple"]};
 const WP_ST = {needed:"Needed",requested:"Requested",received:"Received",fitted:"Fitted"};
 const CATS = ["motor","battery","controller","charger","suspension","brakes","frame","electrical","drivetrain","plastics","other"];
 const MOVE_KINDS = {received:["Received",1],sold_retail:["Sold retail",-1],to_dealer:["To dealer",-1],warranty:["Used on warranty",-1],returned:["Returned",1],adjustment:["Adjustment (+/-)",0]};
@@ -213,14 +219,15 @@ function localSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
 
 async function loadAll() {
   const t = n => sb.from(n).select("*");
-  const [models, dealers, customers, shipments, lines, parts, bikes, claims, wparts, preorders, pdi, orders, loans] = await Promise.all([
+  const [models, dealers, customers, shipments, lines, parts, bikes, claims, wparts, preorders, pdi, orders, loans, codeOrders] = await Promise.all([
     q(t("al_models").order("id")), q(t("al_dealers").order("business_name")), q(t("al_customers").order("full_name")),
     q(t("al_shipments").order("invoice_date", { ascending: false })), q(t("al_shipment_lines").order("id")),
     q(t("al_part_stock").order("name")), q(t("al_bikes").order("id")), q(t("al_warranty_claims").order("id", { ascending: false })),
     q(t("al_warranty_parts").order("id")), q(t("al_preorders").order("id", { ascending: false })), q(t("al_pdi")), q(t("al_shopify_orders").order("processed_at", { ascending: false }).limit(50)),
-    q(t("al_bike_loans").order("id", { ascending: false }))
+    q(t("al_bike_loans").order("id", { ascending: false })),
+    q(sb.from("al_shopify_orders").select("shopify_order_id,order_name,ordered_at,total_aud,subtotal_aud,parts_aud,bikes_reserved,preorders_created,discount_codes").not("discount_codes", "is", null).order("ordered_at", { ascending: false }))
   ]);
-  Object.assign(S.d, { models, dealers, customers, shipments, lines, parts, bikes, claims, wparts, preorders, pdi, orders, loans });
+  Object.assign(S.d, { models, dealers, customers, shipments, lines, parts, bikes, claims, wparts, preorders, pdi, orders, loans, codeOrders });
 }
 const model = id => byId(S.d.models, id) || {};
 const bikeNo = b => S.d.bikes.filter(x => x.model_id === b.model_id && x.id <= b.id).length;
@@ -282,7 +289,7 @@ const TABS = [["overview","Overview"],["shipments","Shipments"],["bikes","Bikes"
 function render() {
   const d = S.d;
   const openClaims = d.claims.filter(c => !["closed","rejected"].includes(c.status)).length;
-  const loansOut = d.loans.filter(l => l.status === "out"), overdue = loansOut.filter(loanOverdue).length;
+  const loansOut = d.loans.filter(l => l.status === "out" && l.bike_id), overdue = loansOut.filter(loanOverdue).length;
   const counts = { demo: loansOut.length, shipments: d.shipments.filter(s => !["received","cancelled"].includes(s.status)).length, bikes: d.bikes.length, parts: d.parts.length, warranty: openClaims, dealers: d.dealers.length, customers: d.customers.length, preorders: d.preorders.filter(p => ["enquiry","deposit_paid","allocated"].includes(p.status)).length };
   $("#app").innerHTML = `<nav class="tabs">${TABS.map(([k, l]) => `<button data-tab="${k}" aria-pressed="${S.tab === k}">${l}${counts[k] != null ? `<span class="c${(k === "warranty" && openClaims) || (k === "demo" && overdue) ? " alert" : ""}">${counts[k]}</span>` : ""}</button>`).join("")}</nav><section id="view"></section>`;
   document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { S.tab = b.dataset.tab; localSet("al.tab", S.tab); render(); });
@@ -607,27 +614,40 @@ VIEWS.bikes = () => {
    DEMO & MARKETING BIKES
    ====================================================================== */
 const loanOverdue = l => l.status === "out" && l.due_back && l.due_back < today();
+const loanBike = l => l.bike_id ? bikeLabel(byId(S.d.bikes, l.bike_id)) : "No bike (code only)";
+function codeStats(l) {
+  if (!l.promo_code) return null;
+  const code = l.promo_code.trim().toUpperCase();
+  const orders = S.d.codeOrders.filter(o => (o.discount_codes || []).includes(code) && (!l.out_date || o.ordered_at.slice(0, 10) >= l.out_date) && (!l.terms_until || o.ordered_at.slice(0, 10) <= l.terms_until));
+  const sales = orders.reduce((a, o) => a + Number(o.subtotal_aud ?? o.total_aud ?? 0), 0);
+  const bikes = orders.reduce((a, o) => a + (Number(o.bikes_reserved) || 0) + (Number(o.preorders_created) || 0), 0);
+  const parts = orders.reduce((a, o) => a + Number(o.parts_aud || 0), 0);
+  const earned = Math.round((parts * (Number(l.commission_pct) || 0) / 100 + bikes * (Number(l.commission_flat_aud) || 0)) * 100) / 100;
+  return { code, orders, sales, bikes, parts, earned, owed: Math.max(0, earned - (Number(l.commission_paid_aud) || 0)) };
+}
 VIEWS.demo = () => {
   const d = S.d, f = S.f;
   const list = d.loans.filter(l => !f.loanSt || (f.loanSt === "open" ? ["planned","out"].includes(l.status) : l.status === f.loanSt));
-  const out = d.loans.filter(l => l.status === "out"), late = out.filter(loanOverdue).length;
+  const out = d.loans.filter(l => l.status === "out" && l.bike_id), late = out.filter(loanOverdue).length;
   const stat = (n, l, alert) => `<div class="stat${alert ? " alert" : ""}"><span class="n">${n}</span><span class="l">${l}</span></div>`;
-  view(`<div class="strip s4">${stat(out.length, "Bikes out now")}${stat(late, "Overdue back", late)}${stat(d.loans.filter(l => l.status === "gifted").length, "Kept / gifted")}${stat(d.loans.length, "All time")}</div>
-  <p class="hint">Bikes lent for demos, collabs, ambassadors, events and reviews. Marking one Out (or Kept / gifted) sets the bike to Demo / marketing, so it isn't counted as stock for sale. Marking it Returned puts it back in stock.</p>
+  view(`<div class="strip s4">${stat(out.length, "Bikes out now")}${stat(late, "Overdue back", late)}${stat(d.loans.filter(l => l.status === "gifted").length, "Kept by them")}${stat(money(d.loans.reduce((a, l) => a + (codeStats(l)?.owed || 0), 0)) || "$0", "Commission owed")}</div>
+  <p class="hint">Bikes lent or sold for demos, collabs, ambassadors, events and reviews, plus affiliate codes. Pick a collab tier to fill in the standard terms. Marking a bike Out sets the bike to Demo / marketing, so it isn't counted as stock for sale. Marking it Returned puts it back in stock. For a discounted bike, set it to Kept by them and enter what they paid (it's recorded as a sale). For a commission deal, give them a discount code: create the same code in Shopify (Discounts), and every paid Shopify order using it is counted here with the commission owed.</p>
   <div class="tools"><select id="ls"><option value="">All</option><option value="open"${f.loanSt === "open" ? " selected" : ""}>Planned or out</option>${opt(LOAN_ST).map(([v, l]) => `<option value="${v}"${v === f.loanSt ? " selected" : ""}>${l}</option>`).join("")}</select><span style="flex:1"></span>
-  <button class="btn" id="loanCsv">Download list</button><button class="btn primary" id="newL">+ Lend a bike</button></div>
-  <div class="tablewrap"><table><thead><tr><th>Who</th><th>Type</th><th>Bike</th><th>Status</th><th>Out</th><th>Due back</th><th>Deal / content</th></tr></thead><tbody>
-  ${list.map(l => `<tr class="click" data-id="${l.id}"><td><b>${esc(l.recipient)}</b>${l.social_handle ? `<div class="small muted">${esc(l.social_handle)}</div>` : ""}${l.dealer_id ? `<div class="small muted">${esc(dealerName(l.dealer_id))}</div>` : ""}</td><td class="small">${esc(LOAN_KIND[l.kind] || l.kind)}</td><td class="small mono">${esc(bikeLabel(byId(d.bikes, l.bike_id)))}</td><td>${pill(LOAN_ST, l.status)}</td><td class="small">${fdate(l.out_date)}</td><td class="small"${loanOverdue(l) ? ' style="color:var(--red)"' : ""}>${l.status === "returned" ? "Back " + fdate(l.returned_date) : fdate(l.due_back)}${loanOverdue(l) ? " · overdue" : ""}</td><td class="small">${esc((l.agreement || "").slice(0, 80))}${l.content_links ? `<div>${l.content_links.split(/\s+/).filter(u => /^https?:\/\//.test(u)).slice(0, 3).map((u, i) => `<a href="${esc(u)}" target="_blank" rel="noopener" data-stop>Post ${i + 1}</a>`).join(" · ")}</div>` : ""}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">No demo or marketing bikes yet. Use “+ Lend a bike”, or open a bike on the Bikes tab.</td></tr>`}</tbody></table></div>`);
+  <button class="btn" id="loanCsv">Download list</button><button class="btn primary" id="newL">+ New deal</button></div>
+  <div class="tablewrap"><table><thead><tr><th>Who</th><th>Type</th><th>Bike</th><th>Status</th><th>Out</th><th>Due back</th><th>Deal / content</th><th class="r">Code sales</th></tr></thead><tbody>
+  ${list.map(l => `<tr class="click" data-id="${l.id}"><td><b>${esc(l.recipient)}</b>${l.social_handle ? `<div class="small muted">${esc(l.social_handle)}</div>` : ""}${l.dealer_id ? `<div class="small muted">${esc(dealerName(l.dealer_id))}</div>` : ""}</td><td class="small">${esc(LOAN_KIND[l.kind] || l.kind)}</td><td class="small mono">${esc(loanBike(l))}${l.price_paid_aud != null ? `<div class="muted">Paid ${money(l.price_paid_aud)}${l.discount_pct != null ? ` (${Number(l.discount_pct)}% off)` : ""}</div>` : ""}</td><td>${!l.bike_id && ["planned","out"].includes(l.status) ? pill({c:["Code active","--teal"]}, "c") : pill(LOAN_ST, l.status)}</td><td class="small">${fdate(l.out_date)}</td><td class="small"${loanOverdue(l) ? ' style="color:var(--red)"' : ""}>${l.status === "returned" ? "Back " + fdate(l.returned_date) : fdate(l.due_back)}${loanOverdue(l) ? " · overdue" : ""}</td><td class="small">${esc((l.agreement || "").slice(0, 80))}${l.content_links ? `<div>${l.content_links.split(/\s+/).filter(u => /^https?:\/\//.test(u)).slice(0, 3).map((u, i) => `<a href="${esc(u)}" target="_blank" rel="noopener" data-stop>Post ${i + 1}</a>`).join(" · ")}</div>` : ""}</td><td class="r small">${(cs => cs ? `<span class="mono">${esc(cs.code)}</span><div>${cs.bikes} bike${cs.bikes === 1 ? "" : "s"} · ${money(cs.parts) || "$0"} parts</div>${cs.earned ? `<div${cs.owed ? ' style="color:var(--red)"' : ""}>Owed ${money(cs.owed, 2) || "$0"}</div>` : ""}` : "")(codeStats(l))}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">No demo or marketing bikes yet. Use “+ New deal”, or open a bike on the Bikes tab.</td></tr>`}</tbody></table></div>`);
   $("#ls").onchange = e => { f.loanSt = e.target.value; VIEWS.demo(); };
   $("#newL").onclick = () => openLoan(null);
-  $("#loanCsv").onclick = () => downloadXlsx(`AL-demo-bikes-${today()}.xlsx`, [["Demo & marketing", list.map(l => ({ Who: l.recipient, Dealer: dealerName(l.dealer_id), Type: LOAN_KIND[l.kind] || l.kind, Bike: bikeLabel(byId(d.bikes, l.bike_id)), Status: (LOAN_ST[l.status] || [l.status])[0], Phone: l.phone, Email: l.email, Social: l.social_handle, Location: l.location, Out: l.out_date, "Due back": l.due_back, Returned: l.returned_date, Agreement: l.agreement, "Content links": l.content_links, "Condition out": l.condition_out, "Condition back": l.condition_back, "Km/hours back": l.km_back, Notes: l.notes }))]]);
+  $("#loanCsv").onclick = () => downloadXlsx(`AL-demo-bikes-${today()}.xlsx`, [["Demo & marketing", list.map(l => ({ Who: l.recipient, Dealer: dealerName(l.dealer_id), Type: LOAN_KIND[l.kind] || l.kind, Bike: loanBike(l), "Paid AUD": l.price_paid_aud, "Discount %": l.discount_pct, Code: l.promo_code, "Commission %": l.commission_pct, "Commission $ per sale": l.commission_flat_aud, "Code orders": codeStats(l)?.orders.length, "Code sales AUD": codeStats(l)?.sales, "Code bikes": codeStats(l)?.bikes, "Code parts AUD": codeStats(l)?.parts, "Commission earned": codeStats(l)?.earned, "Commission paid": l.commission_paid_aud, "Commission owed": codeStats(l)?.owed, Status: (LOAN_ST[l.status] || [l.status])[0], Phone: l.phone, Email: l.email, Social: l.social_handle, Location: l.location, Out: l.out_date, "Due back": l.due_back, Returned: l.returned_date, Agreement: l.agreement, "Content links": l.content_links, "Condition out": l.condition_out, "Condition back": l.condition_back, "Km/hours back": l.km_back, Notes: l.notes }))]]);
   document.querySelectorAll("a[data-stop]").forEach(a => a.onclick = e => e.stopPropagation());
   document.querySelectorAll("tr[data-id]").forEach(r => r.onclick = () => openLoan(+r.dataset.id));
 };
-const LOAN_F = (cur) => [["bike_id","Bike","select",{groups:bikeGroups(b => ["in_stock","pdi_done","demo"].includes(b.status) || b.id === cur),blank:"Pick a bike",int:1,full:1}],["kind","Type","select",{options:Object.entries(LOAN_KIND),blank:false}],["status","Status","select",{options:opt(LOAN_ST),blank:false}],
+const LOAN_F = (cur) => [["tier","Collab tier (fills in the terms)","select",{options:Object.entries(TIERS).map(([k, t]) => [k, t.label]),blank:"No tier / custom",full:1}],["bike_id","Bike","select",{groups:bikeGroups(b => ["in_stock","pdi_done","demo"].includes(b.status) || b.id === cur),blank:"No bike (discount code only)",int:1,full:1}],["kind","Type","select",{options:Object.entries(LOAN_KIND),blank:false}],["status","Status","select",{options:opt(LOAN_ST),blank:false}],
   ["recipient","Who has it (person or channel)"],["dealer_id","Dealer (if a dealer demo)","select",{options:dealerOpts(),int:1}],["social_handle","Social handle / channel","text",{ph:"@name, YouTube channel"}],["phone","Phone","tel"],["email","Email","email"],["location","Where the bike is","text",{ph:"Suburb or venue"}],
   ["out_date","Out date","date"],["due_back","Due back","date"],["returned_date","Returned date","date"],
   ["agreement","What we agreed (videos, posts, event days, dates)","textarea"],["content_links","Links to their posts (one per line)","textarea"],
+  ["price_paid_aud","Price they paid AUD (blank if free or a loan)","number"],["discount_pct","Discount % off store price (worked out if blank)","number"],
+  ["promo_code","Their discount code (same as in Shopify)","text",{ph:"e.g. MAL10"}],["terms_until","Commission deal ends","date"],["commission_flat_aud","Commission $ per bike sold with their code","number"],["commission_pct","Commission % of parts orders with their code","number"],["commission_paid_aud","Commission paid to them so far AUD","number"],
   ["condition_out","Condition going out"],["condition_back","Condition coming back"],["km_back","Km / hours on return"],["notes","Notes","textarea"]];
 async function bikeBackToStock(bikeId, exceptLoan) {
   if (S.d.loans.some(l => l.bike_id === bikeId && l.id !== exceptLoan && ["out","gifted"].includes(l.status))) return;
@@ -636,23 +656,43 @@ async function bikeBackToStock(bikeId, exceptLoan) {
 }
 function openLoan(id, preset = {}) {
   const l = id ? byId(S.d.loans, id) : { kind: "demo", status: "out", out_date: today(), ...preset };
-  const F = LOAN_F(l.bike_id);
-  const dr = drawer({ title: id ? `${l.recipient} · ${LOAN_KIND[l.kind] || l.kind}` : "Lend a bike", wide: true, body: fieldsHtml(F, l), foot: `${id ? delBtn() : "<span></span>"}<button class="btn primary" id="saveBtn">Save</button>` });
+  const F = LOAN_F(l.bike_id); S.belowCostOk = false;
+  const cs = id ? codeStats(l) : null;
+  const tierPrice = (t, bikeId) => { const b = byId(S.d.bikes, bikeId), m = b ? model(b.model_id) : null; if (!m || !t.off) return null; if (t.off === "cost") return b.landed_cost_aud ? Math.round(b.landed_cost_aud * 1.1) : null; const base = m.store_price_aud || m.rrp_aud; return base ? Math.round(base * (1 - t.off / 100)) : null; };
+  const csHtml = cs ? `<div class="section"><h4>Orders using ${esc(cs.code)}</h4><p class="small" style="margin:0 0 6px">${cs.orders.length} paid order${cs.orders.length === 1 ? "" : "s"} · ${money(cs.sales, 2) || "$0"} in sales · ${cs.bikes} bike${cs.bikes === 1 ? "" : "s"} · ${money(cs.parts, 2) || "$0"} of parts · commission earned ${money(cs.earned, 2) || "$0"} · paid ${money(l.commission_paid_aud || 0, 2)} · <b>owed ${money(cs.owed, 2) || "$0"}</b></p>${cs.orders.map(o => `<div class="small">${esc(o.order_name)} · ${fdate(o.ordered_at.slice(0, 10))} · ${money(o.subtotal_aud ?? o.total_aud, 2)}${(o.bikes_reserved || 0) + (o.preorders_created || 0) ? ` · ${(o.bikes_reserved || 0) + (o.preorders_created || 0)} bike` : ""}${o.parts_aud ? ` · parts ${money(o.parts_aud, 2)}` : ""}</div>`).join("")}</div>` : "";
+  const dr = drawer({ title: id ? `${l.recipient} · ${LOAN_KIND[l.kind] || l.kind}` : "New demo / marketing deal", wide: true, body: fieldsHtml(F, l) + csHtml, foot: `${id ? delBtn() : "<span></span>"}<button class="btn primary" id="saveBtn">Save</button>` });
+  const applyTier = () => {
+    const t = TIERS[$("#f_tier").value]; if (!t) return;
+    const set = (k, v) => { const el = $("#f_" + k); if (el && v != null && v !== "") el.value = v; };
+    set("kind", t.kind); set("status", t.status); set("commission_flat_aud", t.flat); set("commission_pct", t.pct); set("agreement", t.agreement);
+    if (t.days) set("due_back", new Date(Date.now() + t.days * 864e5).toLocaleDateString("en-CA"));
+    if (t.off) { const pr = tierPrice(t, +$("#f_bike_id").value); if (pr) { set("price_paid_aud", pr); $("#f_discount_pct").value = ""; } }
+    else { $("#f_price_paid_aud").value = ""; $("#f_discount_pct").value = ""; }
+    if (!t.off && t.status !== "out") $("#f_bike_id").value = $("#f_tier").value === "affiliate" ? "" : $("#f_bike_id").value;
+  };
+  $("#f_tier").onchange = applyTier;
+  $("#f_bike_id").onchange = () => { const t = TIERS[$("#f_tier").value]; if (t && t.off) { const pr = tierPrice(t, +$("#f_bike_id").value); if (pr) { $("#f_price_paid_aud").value = pr; $("#f_discount_pct").value = ""; } } };
   dr.querySelector("#saveBtn").onclick = guard(async () => {
     const row = readFields(F);
-    if (!row.bike_id) throw new Error("Pick the bike");
+    if (!row.bike_id && !row.promo_code) throw new Error("Pick the bike, or enter their discount code");
+    if (row.promo_code) { row.promo_code = row.promo_code.toUpperCase().replace(/\s+/g, ""); if (S.d.loans.some(x => x.id !== id && (x.promo_code || "").toUpperCase() === row.promo_code)) throw new Error(`The code ${row.promo_code} is already used by someone else`); }
+    if (row.commission_paid_aud == null) row.commission_paid_aud = 0;
     if (!row.recipient) throw new Error("Who has the bike?");
     if (row.status === "out" && !row.out_date) row.out_date = today();
     if (row.status === "returned" && !row.returned_date) row.returned_date = today();
-    const b = byId(S.d.bikes, row.bike_id);
-    if (["out","gifted"].includes(row.status) && S.d.loans.some(x => x.bike_id === row.bike_id && x.id !== id && ["out","gifted"].includes(x.status))) throw new Error(`${bikeLabel(b)} is already out with someone else`);
+    const b = row.bike_id ? byId(S.d.bikes, row.bike_id) : null;
+    const basePrice = b ? (model(b.model_id).store_price_aud || model(b.model_id).rrp_aud) : null;
+    if (b && row.price_paid_aud != null && row.discount_pct == null && basePrice) row.discount_pct = Math.round((1 - row.price_paid_aud / basePrice) * 1000) / 10;
+    if (b && row.price_paid_aud != null && b.landed_cost_aud && row.price_paid_aud < b.landed_cost_aud * 1.1 - 1 && !S.belowCostOk) { S.belowCostOk = true; throw new Error(`${money(row.price_paid_aud)} is below what this bike costs us landed (about ${money(b.landed_cost_aud * 1.1)} inc GST). Tap Save again to keep it.`); }
+    if (b && ["out","gifted"].includes(row.status) && S.d.loans.some(x => x.bike_id === row.bike_id && x.id !== id && ["out","gifted"].includes(x.status))) throw new Error(`${bikeLabel(b)} is already out with someone else`);
     const r = await saveRow("al_bike_loans", id, row);
-    if (["out","gifted"].includes(row.status)) await q(sb.from("al_bikes").update({ status: "demo", location: row.location || b.location }).eq("id", row.bike_id).in("status", ["in_stock","pdi_done","demo"]));
-    else await bikeBackToStock(row.bike_id, r.id);
-    if (id && l.bike_id !== row.bike_id) await bikeBackToStock(l.bike_id, r.id);
+    if (b && row.status === "gifted" && row.price_paid_aud != null) await q(sb.from("al_bikes").update({ status: "sold_retail", sale_price_aud: row.price_paid_aud, sold_date: b.sold_date || row.out_date || today(), notes: [b.notes, `Sold to ${row.recipient} at ${row.discount_pct != null ? row.discount_pct + "% off" : "a discount"} (${LOAN_KIND[row.kind] || row.kind} deal)`].filter(Boolean).join("\n") }).eq("id", row.bike_id).in("status", ["in_stock","pdi_done","demo","sold_retail"]));
+    else if (b && ["out","gifted"].includes(row.status)) await q(sb.from("al_bikes").update({ status: "demo", location: row.location || b.location }).eq("id", row.bike_id).in("status", ["in_stock","pdi_done","demo"]));
+    else if (b) await bikeBackToStock(row.bike_id, r.id);
+    if (id && l.bike_id && l.bike_id !== row.bike_id) await bikeBackToStock(l.bike_id, r.id);
     closeDrawer(); await rerender(); toast("Saved");
   });
-  armDelete(dr, async () => { await q(sb.from("al_bike_loans").delete().eq("id", id)); await bikeBackToStock(l.bike_id, id); });
+  armDelete(dr, async () => { await q(sb.from("al_bike_loans").delete().eq("id", id)); if (l.bike_id) await bikeBackToStock(l.bike_id, id); });
 }
 
 const BIKE_F = () => [["model_id","Model","select",{options:modelOpts(),blank:false,int:1}],["status","Status","select",{options:opt(BIKE_ST),blank:false}],["frame_no","Frame no. (optional)"],["location","Location",'text',{ph:"e.g. Balcatta shop"}],["landed_cost_aud","Landed cost AUD","number"],["dealer_id","Dealer","select",{options:dealerOpts(),int:1}],["customer_id","Customer (retail buyer or end rider)","select",{options:custOpts(),int:1}],["sale_price_aud","Sold for AUD (inc GST)","number"],["sold_date","Sold date","date"],["delivered_date","Delivered date","date"],["shipment_id","Shipment","select",{options:S.d.shipments.map(s => [s.id, s.ref]),int:1}],["notes","Notes","textarea"]];
