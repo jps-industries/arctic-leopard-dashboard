@@ -39,6 +39,15 @@ Refunds and cancellations are not reversed automatically; adjust stock on the Pa
 `claim.html` is a public form (no login) that posts to the edge function `al-warranty-submit`, which creates the customer, a New claim marked Website, and stores the photos and proof of purchase in the private bucket. To put it on the Shopify warranty page, add a **Custom Liquid** section with:
 
 ```html
-<iframe id="al-claim" src="https://jps-industries.github.io/arctic-leopard-dashboard/claim.html" style="width:100%;border:0;min-height:1400px" title="Warranty claim form"></iframe>
-<script>addEventListener("message",e=>{if(e.data&&e.data.alClaimHeight)document.getElementById("al-claim").style.height=e.data.alClaimHeight+"px"});</script>
+<div style="max-width:760px;margin:0 auto;width:100%">
+  <iframe id="al-claim" src="https://jps-industries.github.io/arctic-leopard-dashboard/claim.html" title="Warranty claim form" style="width:100%;height:2100px;border:0;display:block;background:transparent" loading="lazy"></iframe>
+</div>
+<script>
+  window.addEventListener("message", function (e) {
+    if (e.origin !== "https://jps-industries.github.io" || !e.data) return;
+    var f = document.getElementById("al-claim");
+    if (e.data.alClaimHeight) f.style.height = (e.data.alClaimHeight + 10) + "px";
+    if (e.data.alClaimDone) f.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+</script>
 ```
