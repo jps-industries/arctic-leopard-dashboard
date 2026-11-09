@@ -58,6 +58,7 @@ button{cursor:pointer}
 .tabs .c{font-family:var(--mono);font-size:11px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:0 7px;letter-spacing:0}
 .tabs .c.alert{background:var(--red);border-color:var(--red);color:#fff}
 .strip{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin-bottom:16px}
+.strip.s4{grid-template-columns:repeat(4,minmax(0,1fr))}
 .stat{background:var(--surface);border:0;text-align:left;padding:10px 14px 11px;display:flex;flex-direction:column;gap:2px}
 .stat:hover{background:var(--surface-2)}
 .stat .n{font-weight:300;font-size:32px;line-height:1;font-variant-numeric:tabular-nums}
@@ -139,6 +140,7 @@ td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
 @media (max-width:1100px){.strip{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media (max-width:900px){.grid2{grid-template-columns:1fr}.strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:600px){
+.strip.s4{grid-template-columns:repeat(2,minmax(0,1fr))}
   .wm{font-size:26px}.divider{display:none}.brand h1{font-size:17px}
   .strip{grid-template-columns:repeat(2,minmax(0,1fr))}.stat .n{font-size:26px}
   .form,.checks{grid-template-columns:1fr}
@@ -174,11 +176,13 @@ const sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession
 const BUCKET = "al-warranty";
 
 /* ---------- labels ---------- */
-const BIKE_ST = {in_transit:["In transit","--blue"],in_stock:["In stock","--teal"],pdi_done:["PDI done","--green"],reserved:["Reserved","--purple"],sold_retail:["Sold retail","--grey"],to_dealer:["With dealer","--amber"],demo:["Demo","--blue"],warranty_hold:["Warranty hold","--red"],written_off:["Written off","--grey"]};
+const BIKE_ST = {in_transit:["In transit","--blue"],in_stock:["In stock","--teal"],pdi_done:["PDI done","--green"],reserved:["Reserved","--purple"],sold_retail:["Sold retail","--grey"],to_dealer:["With dealer","--amber"],demo:["Demo / marketing","--blue"],warranty_hold:["Warranty hold","--red"],written_off:["Written off","--grey"]};
 const SHIP_ST = {ordered:["Ordered","--grey"],deposit_paid:["Deposit paid","--amber"],balance_paid:["Balance paid","--amber"],shipped:["Shipped","--blue"],arrived:["Arrived","--purple"],received:["Received","--green"],cancelled:["Cancelled","--grey"]};
 const CLAIM_ST = {new:["New","--red"],assessing:["Assessing","--amber"],parts_requested:["Parts requested","--blue"],parts_received:["Parts received","--purple"],shipped:["Shipped to customer","--blue"],delivered:["Customer received","--teal"],repaired:["Repaired","--teal"],closed:["Closed","--green"],rejected:["Rejected","--grey"]};
 const DEALER_ST = {prospect:["Prospect","--amber"],active:["Active","--green"],paused:["Paused","--grey"],ended:["Ended","--grey"]};
 const PRE_ST = {enquiry:["Enquiry","--grey"],deposit_paid:["Deposit paid","--amber"],allocated:["Bike allocated","--blue"],delivered:["Delivered","--green"],cancelled:["Cancelled","--grey"],refunded:["Refunded","--grey"]};
+const LOAN_KIND = {demo:"Demo bike",collab:"Collab / content",ambassador:"Ambassador / rider",event:"Event or show",media:"Media / review",staff:"Staff use"};
+const LOAN_ST = {planned:["Planned","--grey"],out:["Out","--blue"],returned:["Returned","--green"],gifted:["Kept / gifted","--purple"]};
 const WP_ST = {needed:"Needed",requested:"Requested",received:"Received",fitted:"Fitted"};
 const CATS = ["motor","battery","controller","charger","suspension","brakes","frame","electrical","drivetrain","plastics","other"];
 const MOVE_KINDS = {received:["Received",1],sold_retail:["Sold retail",-1],to_dealer:["To dealer",-1],warranty:["Used on warranty",-1],returned:["Returned",1],adjustment:["Adjustment (+/-)",0]};
@@ -209,13 +213,14 @@ function localSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
 
 async function loadAll() {
   const t = n => sb.from(n).select("*");
-  const [models, dealers, customers, shipments, lines, parts, bikes, claims, wparts, preorders, pdi, orders] = await Promise.all([
+  const [models, dealers, customers, shipments, lines, parts, bikes, claims, wparts, preorders, pdi, orders, loans] = await Promise.all([
     q(t("al_models").order("id")), q(t("al_dealers").order("business_name")), q(t("al_customers").order("full_name")),
     q(t("al_shipments").order("invoice_date", { ascending: false })), q(t("al_shipment_lines").order("id")),
     q(t("al_part_stock").order("name")), q(t("al_bikes").order("id")), q(t("al_warranty_claims").order("id", { ascending: false })),
-    q(t("al_warranty_parts").order("id")), q(t("al_preorders").order("id", { ascending: false })), q(t("al_pdi")), q(t("al_shopify_orders").order("processed_at", { ascending: false }).limit(50))
+    q(t("al_warranty_parts").order("id")), q(t("al_preorders").order("id", { ascending: false })), q(t("al_pdi")), q(t("al_shopify_orders").order("processed_at", { ascending: false }).limit(50)),
+    q(t("al_bike_loans").order("id", { ascending: false }))
   ]);
-  Object.assign(S.d, { models, dealers, customers, shipments, lines, parts, bikes, claims, wparts, preorders, pdi, orders });
+  Object.assign(S.d, { models, dealers, customers, shipments, lines, parts, bikes, claims, wparts, preorders, pdi, orders, loans });
 }
 const model = id => byId(S.d.models, id) || {};
 const bikeNo = b => S.d.bikes.filter(x => x.model_id === b.model_id && x.id <= b.id).length;
@@ -273,12 +278,13 @@ $("#logoutBtn").onclick = async () => { await sb.auth.signOut(); boot(); };
 $("#refreshBtn").onclick = guard(async () => { await loadAll(); render(); toast("Up to date"); });
 
 /* ---------- shell ---------- */
-const TABS = [["overview","Overview"],["shipments","Shipments"],["bikes","Bikes"],["parts","Parts"],["warranty","Warranty"],["dealers","Dealers"],["customers","Customers"],["preorders","Pre-orders"]];
+const TABS = [["overview","Overview"],["shipments","Shipments"],["bikes","Bikes"],["demo","Demo & marketing"],["parts","Parts"],["warranty","Warranty"],["dealers","Dealers"],["customers","Customers"],["preorders","Pre-orders"]];
 function render() {
   const d = S.d;
   const openClaims = d.claims.filter(c => !["closed","rejected"].includes(c.status)).length;
-  const counts = { shipments: d.shipments.filter(s => !["received","cancelled"].includes(s.status)).length, bikes: d.bikes.length, parts: d.parts.length, warranty: openClaims, dealers: d.dealers.length, customers: d.customers.length, preorders: d.preorders.filter(p => ["enquiry","deposit_paid","allocated"].includes(p.status)).length };
-  $("#app").innerHTML = `<nav class="tabs">${TABS.map(([k, l]) => `<button data-tab="${k}" aria-pressed="${S.tab === k}">${l}${counts[k] != null ? `<span class="c${k === "warranty" && openClaims ? " alert" : ""}">${counts[k]}</span>` : ""}</button>`).join("")}</nav><section id="view"></section>`;
+  const loansOut = d.loans.filter(l => l.status === "out"), overdue = loansOut.filter(loanOverdue).length;
+  const counts = { demo: loansOut.length, shipments: d.shipments.filter(s => !["received","cancelled"].includes(s.status)).length, bikes: d.bikes.length, parts: d.parts.length, warranty: openClaims, dealers: d.dealers.length, customers: d.customers.length, preorders: d.preorders.filter(p => ["enquiry","deposit_paid","allocated"].includes(p.status)).length };
+  $("#app").innerHTML = `<nav class="tabs">${TABS.map(([k, l]) => `<button data-tab="${k}" aria-pressed="${S.tab === k}">${l}${counts[k] != null ? `<span class="c${(k === "warranty" && openClaims) || (k === "demo" && overdue) ? " alert" : ""}">${counts[k]}</span>` : ""}</button>`).join("")}</nav><section id="view"></section>`;
   document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { S.tab = b.dataset.tab; localSet("al.tab", S.tab); render(); });
   (VIEWS[S.tab] || VIEWS.overview)();
 }
@@ -597,18 +603,72 @@ VIEWS.bikes = () => {
   $("#bikeCsv").onclick = () => downloadXlsx(`AL-bikes-${today()}.xlsx`, [["Bikes", list.map(b => ({ Bike: bikeLabel(b), Model: model(b.model_id).name, Status: (BIKE_ST[b.status] || [b.status])[0], Dealer: dealerName(b.dealer_id), Customer: custName(b.customer_id), Location: b.location, "Landed AUD": b.landed_cost_aud, "Sold for AUD": b.sale_price_aud, "Sold date": b.sold_date, Notes: b.notes }))]]);
   document.querySelectorAll("tr[data-id]").forEach(r => r.onclick = () => openBike(+r.dataset.id));
 };
+/* ======================================================================
+   DEMO & MARKETING BIKES
+   ====================================================================== */
+const loanOverdue = l => l.status === "out" && l.due_back && l.due_back < today();
+VIEWS.demo = () => {
+  const d = S.d, f = S.f;
+  const list = d.loans.filter(l => !f.loanSt || (f.loanSt === "open" ? ["planned","out"].includes(l.status) : l.status === f.loanSt));
+  const out = d.loans.filter(l => l.status === "out"), late = out.filter(loanOverdue).length;
+  const stat = (n, l, alert) => `<div class="stat${alert ? " alert" : ""}"><span class="n">${n}</span><span class="l">${l}</span></div>`;
+  view(`<div class="strip s4">${stat(out.length, "Bikes out now")}${stat(late, "Overdue back", late)}${stat(d.loans.filter(l => l.status === "gifted").length, "Kept / gifted")}${stat(d.loans.length, "All time")}</div>
+  <p class="hint">Bikes lent for demos, collabs, ambassadors, events and reviews. Marking one Out (or Kept / gifted) sets the bike to Demo / marketing, so it isn't counted as stock for sale. Marking it Returned puts it back in stock.</p>
+  <div class="tools"><select id="ls"><option value="">All</option><option value="open"${f.loanSt === "open" ? " selected" : ""}>Planned or out</option>${opt(LOAN_ST).map(([v, l]) => `<option value="${v}"${v === f.loanSt ? " selected" : ""}>${l}</option>`).join("")}</select><span style="flex:1"></span>
+  <button class="btn" id="loanCsv">Download list</button><button class="btn primary" id="newL">+ Lend a bike</button></div>
+  <div class="tablewrap"><table><thead><tr><th>Who</th><th>Type</th><th>Bike</th><th>Status</th><th>Out</th><th>Due back</th><th>Deal / content</th></tr></thead><tbody>
+  ${list.map(l => `<tr class="click" data-id="${l.id}"><td><b>${esc(l.recipient)}</b>${l.social_handle ? `<div class="small muted">${esc(l.social_handle)}</div>` : ""}${l.dealer_id ? `<div class="small muted">${esc(dealerName(l.dealer_id))}</div>` : ""}</td><td class="small">${esc(LOAN_KIND[l.kind] || l.kind)}</td><td class="small mono">${esc(bikeLabel(byId(d.bikes, l.bike_id)))}</td><td>${pill(LOAN_ST, l.status)}</td><td class="small">${fdate(l.out_date)}</td><td class="small"${loanOverdue(l) ? ' style="color:var(--red)"' : ""}>${l.status === "returned" ? "Back " + fdate(l.returned_date) : fdate(l.due_back)}${loanOverdue(l) ? " · overdue" : ""}</td><td class="small">${esc((l.agreement || "").slice(0, 80))}${l.content_links ? `<div>${l.content_links.split(/\s+/).filter(u => /^https?:\/\//.test(u)).slice(0, 3).map((u, i) => `<a href="${esc(u)}" target="_blank" rel="noopener" data-stop>Post ${i + 1}</a>`).join(" · ")}</div>` : ""}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">No demo or marketing bikes yet. Use “+ Lend a bike”, or open a bike on the Bikes tab.</td></tr>`}</tbody></table></div>`);
+  $("#ls").onchange = e => { f.loanSt = e.target.value; VIEWS.demo(); };
+  $("#newL").onclick = () => openLoan(null);
+  $("#loanCsv").onclick = () => downloadXlsx(`AL-demo-bikes-${today()}.xlsx`, [["Demo & marketing", list.map(l => ({ Who: l.recipient, Dealer: dealerName(l.dealer_id), Type: LOAN_KIND[l.kind] || l.kind, Bike: bikeLabel(byId(d.bikes, l.bike_id)), Status: (LOAN_ST[l.status] || [l.status])[0], Phone: l.phone, Email: l.email, Social: l.social_handle, Location: l.location, Out: l.out_date, "Due back": l.due_back, Returned: l.returned_date, Agreement: l.agreement, "Content links": l.content_links, "Condition out": l.condition_out, "Condition back": l.condition_back, "Km/hours back": l.km_back, Notes: l.notes }))]]);
+  document.querySelectorAll("a[data-stop]").forEach(a => a.onclick = e => e.stopPropagation());
+  document.querySelectorAll("tr[data-id]").forEach(r => r.onclick = () => openLoan(+r.dataset.id));
+};
+const LOAN_F = (cur) => [["bike_id","Bike","select",{groups:bikeGroups(b => ["in_stock","pdi_done","demo"].includes(b.status) || b.id === cur),blank:"Pick a bike",int:1,full:1}],["kind","Type","select",{options:Object.entries(LOAN_KIND),blank:false}],["status","Status","select",{options:opt(LOAN_ST),blank:false}],
+  ["recipient","Who has it (person or channel)"],["dealer_id","Dealer (if a dealer demo)","select",{options:dealerOpts(),int:1}],["social_handle","Social handle / channel","text",{ph:"@name, YouTube channel"}],["phone","Phone","tel"],["email","Email","email"],["location","Where the bike is","text",{ph:"Suburb or venue"}],
+  ["out_date","Out date","date"],["due_back","Due back","date"],["returned_date","Returned date","date"],
+  ["agreement","What we agreed (videos, posts, event days, dates)","textarea"],["content_links","Links to their posts (one per line)","textarea"],
+  ["condition_out","Condition going out"],["condition_back","Condition coming back"],["km_back","Km / hours on return"],["notes","Notes","textarea"]];
+async function bikeBackToStock(bikeId, exceptLoan) {
+  if (S.d.loans.some(l => l.bike_id === bikeId && l.id !== exceptLoan && ["out","gifted"].includes(l.status))) return;
+  const p = S.d.pdi.find(x => x.bike_id === bikeId);
+  await q(sb.from("al_bikes").update({ status: p && p.completed_at ? "pdi_done" : "in_stock" }).eq("id", bikeId).eq("status", "demo"));
+}
+function openLoan(id, preset = {}) {
+  const l = id ? byId(S.d.loans, id) : { kind: "demo", status: "out", out_date: today(), ...preset };
+  const F = LOAN_F(l.bike_id);
+  const dr = drawer({ title: id ? `${l.recipient} · ${LOAN_KIND[l.kind] || l.kind}` : "Lend a bike", wide: true, body: fieldsHtml(F, l), foot: `${id ? delBtn() : "<span></span>"}<button class="btn primary" id="saveBtn">Save</button>` });
+  dr.querySelector("#saveBtn").onclick = guard(async () => {
+    const row = readFields(F);
+    if (!row.bike_id) throw new Error("Pick the bike");
+    if (!row.recipient) throw new Error("Who has the bike?");
+    if (row.status === "out" && !row.out_date) row.out_date = today();
+    if (row.status === "returned" && !row.returned_date) row.returned_date = today();
+    const b = byId(S.d.bikes, row.bike_id);
+    if (["out","gifted"].includes(row.status) && S.d.loans.some(x => x.bike_id === row.bike_id && x.id !== id && ["out","gifted"].includes(x.status))) throw new Error(`${bikeLabel(b)} is already out with someone else`);
+    const r = await saveRow("al_bike_loans", id, row);
+    if (["out","gifted"].includes(row.status)) await q(sb.from("al_bikes").update({ status: "demo", location: row.location || b.location }).eq("id", row.bike_id).in("status", ["in_stock","pdi_done","demo"]));
+    else await bikeBackToStock(row.bike_id, r.id);
+    if (id && l.bike_id !== row.bike_id) await bikeBackToStock(l.bike_id, r.id);
+    closeDrawer(); await rerender(); toast("Saved");
+  });
+  armDelete(dr, async () => { await q(sb.from("al_bike_loans").delete().eq("id", id)); await bikeBackToStock(l.bike_id, id); });
+}
+
 const BIKE_F = () => [["model_id","Model","select",{options:modelOpts(),blank:false,int:1}],["status","Status","select",{options:opt(BIKE_ST),blank:false}],["frame_no","Frame no. (optional)"],["location","Location",'text',{ph:"e.g. Balcatta shop"}],["landed_cost_aud","Landed cost AUD","number"],["dealer_id","Dealer","select",{options:dealerOpts(),int:1}],["customer_id","Customer (retail buyer or end rider)","select",{options:custOpts(),int:1}],["sale_price_aud","Sold for AUD (inc GST)","number"],["sold_date","Sold date","date"],["delivered_date","Delivered date","date"],["shipment_id","Shipment","select",{options:S.d.shipments.map(s => [s.id, s.ref]),int:1}],["notes","Notes","textarea"]];
 const PDI_F = [["unpacked","Unpacked, checked for transit damage"],["assembled","Assembled (bars, wheel, fender)"],["charged","Battery fully charged"],["torque_checked","Torque check all fasteners"],["brakes_bled","Brakes checked or bled"],["suspension_set","Suspension set for rider"],["test_ridden","Test ridden"],["photos_taken","Photos and serials recorded"]];
 function openBike(id) {
   const b = id ? byId(S.d.bikes, id) : { status: "in_stock", model_id: S.d.models[0]?.id };
   const p = (id && S.d.pdi.find(x => x.bike_id === id)) || {};
   const claims = id ? S.d.claims.filter(c => c.bike_id === id) : [];
+  const loans = id ? S.d.loans.filter(l => l.bike_id === id) : [];
   const dr = drawer({ title: id ? bikeLabel(b) : "New bike", wide: true,
     body: `<p class="hint" style="margin:0">To sell retail: pick or add the customer, set status to Sold retail, the price and date. To send to a dealer: pick the dealer, set status to With dealer, the dealer price and date.</p>` + fieldsHtml(BIKE_F(), b) +
       `<div class="section"><h4>Pre-delivery inspection ${p.completed_at ? `<span class="tag">Done ${fdate(p.completed_at)}</span>` : ""}</h4><div class="checks">${PDI_F.map(([k, l]) => `<label><input type="checkbox" id="pdi_${k}"${p[k] ? " checked" : ""}> ${esc(l)}</label>`).join("")}</div>
       <div class="form"><div class="field"><label for="pdi_by">Done by</label><input id="pdi_by" value="${esc(p.completed_by || "")}"></div><div class="field"><label for="pdi_notes">PDI notes</label><input id="pdi_notes" value="${esc(p.notes || "")}"></div></div></div>` +
+      (loans.length ? `<div class="section"><h4>Demo & marketing</h4>${loans.map(l => `<div><button class="linkbtn" data-l="${l.id}">${esc(l.recipient)}</button> ${pill(LOAN_ST, l.status)} <span class="small">${esc(LOAN_KIND[l.kind] || l.kind)} · ${fdate(l.out_date)}${l.returned_date ? " to " + fdate(l.returned_date) : l.due_back ? ", due " + fdate(l.due_back) : ""}</span></div>`).join("")}</div>` : "") +
       (claims.length ? `<div class="section"><h4>Warranty claims</h4>${claims.map(c => `<div><button class="linkbtn" data-c="${c.id}">${esc(c.claim_no)}</button> ${pill(CLAIM_ST, c.status)} <span class="small">${esc(c.problem.slice(0, 80))}</span></div>`).join("")}</div>` : ""),
-    foot: `${id ? delBtn() : "<span></span>"}<span style="display:flex;gap:8px">${id ? `<button class="btn" id="claimBtn">New warranty claim</button>` : ""}<button class="btn primary" id="saveBtn">Save</button></span>` });
+    foot: `${id ? delBtn() : "<span></span>"}<span style="display:flex;gap:8px">${id && ["in_stock","pdi_done","demo"].includes(b.status) ? `<button class="btn" id="loanBtn">Lend for demo / marketing</button>` : ""}${id ? `<button class="btn" id="claimBtn">New warranty claim</button>` : ""}<button class="btn primary" id="saveBtn">Save</button></span>` });
   dr.querySelector("#saveBtn").onclick = guard(async () => {
     const row = readFields(BIKE_F());
     if (row.status === "to_dealer" && !row.dealer_id) throw new Error("Pick the dealer");
@@ -625,6 +685,8 @@ function openBike(id) {
   });
   armDelete(dr, async () => { if (claims.length) throw new Error("This bike has warranty claims; it can't be deleted"); await q(sb.from("al_bikes").delete().eq("id", id)); });
   dr.querySelectorAll("[data-c]").forEach(x => x.onclick = () => openClaim(+x.dataset.c));
+  dr.querySelectorAll("[data-l]").forEach(x => x.onclick = () => openLoan(+x.dataset.l));
+  const lb = dr.querySelector("#loanBtn"); if (lb) lb.onclick = () => openLoan(null, { bike_id: id });
   const cb = dr.querySelector("#claimBtn"); if (cb) cb.onclick = () => openClaim(null, { bike_id: id, customer_id: b.customer_id, dealer_id: b.dealer_id, purchase_date: b.sold_date });
 }
 function openFrameEntry() {
