@@ -66,11 +66,14 @@ Deno.serve(async (req) => {
 
     for (const li of order.line_items || []) {
       const pid = li.product_id ? String(li.product_id) : null;
+      const sku = typeof li.sku === "string" && li.sku.trim() ? li.sku.trim() : null;
       const qty = Number(li.quantity) || 0;
       const unit = Number(li.price) || null;
-      if (!pid || qty <= 0) { unmatched.push({ title: li.title, qty, reason: "no product" }); continue; }
+      if ((!pid && !sku) || qty <= 0) { unmatched.push({ title: li.title, qty, reason: "no product" }); continue; }
 
-      const part = must(await db.from("al_parts").select("id").eq("shopify_product_id", pid).limit(1));
+      // Match on SKU first (same code in Shopify and the dashboard), then on the Shopify product ID.
+      let part = sku ? must(await db.from("al_parts").select("id").eq("sku", sku).limit(1)) : [];
+      if (!part.length && pid) part = must(await db.from("al_parts").select("id").eq("shopify_product_id", pid).limit(1));
       if (part.length) {
         must(await db.from("al_stock_movements").insert({
           part_id: part[0].id, qty: -qty, kind: dealerId ? "to_dealer" : "sold_retail",
@@ -80,7 +83,8 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const model = must(await db.from("al_models").select("id,name").eq("shopify_product_id", pid).limit(1));
+      let model = sku ? must(await db.from("al_models").select("id,name").eq("sku", sku).limit(1)) : [];
+      if (!model.length && pid) model = must(await db.from("al_models").select("id,name").eq("shopify_product_id", pid).limit(1));
       if (model.length) {
         for (let i = 0; i < qty; i++) {
           // Prefer a bike already in stock (PDI done first), then one on the water.
@@ -100,7 +104,7 @@ Deno.serve(async (req) => {
         }
         continue;
       }
-      unmatched.push({ title: li.title, qty, product_id: pid, reason: "not in dashboard" });
+      unmatched.push({ title: li.title, qty, sku, product_id: pid, reason: "not in dashboard" });
     }
 
     must(await db.from("al_shopify_orders").update({ customer_id: customerId, dealer_id: dealerId, parts_lines: partsLines, bikes_reserved: bikes, preorders_created: preorders, unmatched }).eq("shopify_order_id", orderId));
