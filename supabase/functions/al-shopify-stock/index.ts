@@ -55,12 +55,16 @@ Deno.serve(async (req) => {
 
     if (body.register_webhook) {
       const uri = `${URL_}/functions/v1/al-shopify-order`;
-      const have = await gql(tok, `{ webhookSubscriptions(first: 50, topics: [ORDERS_PAID]) { nodes { id uri } } }`);
-      if (!have.webhookSubscriptions.nodes.some((n: { uri: string }) => n.uri === uri)) {
-        const r = await gql(tok, `mutation($u: String!) { webhookSubscriptionCreate(topic: ORDERS_PAID, webhookSubscription: { uri: $u, format: JSON }) { userErrors { message } } }`, { u: uri });
-        const e = r.webhookSubscriptionCreate.userErrors; if (e.length) throw new Error("Webhook: " + e.map((x: { message: string }) => x.message).join("; "));
-        out.webhook = "created";
-      } else out.webhook = "already set up";
+      const made: string[] = [];
+      for (const topic of ["ORDERS_PAID", "REFUNDS_CREATE", "ORDERS_CANCELLED"]) {
+        const have = await gql(tok, `{ webhookSubscriptions(first: 50, topics: [${topic}]) { nodes { id uri } } }`);
+        if (have.webhookSubscriptions.nodes.some((n: { uri: string }) => n.uri === uri)) continue;
+        const r = await gql(tok, `mutation($u: String!) { webhookSubscriptionCreate(topic: ${topic}, webhookSubscription: { uri: $u, format: JSON }) { userErrors { message } } }`, { u: uri });
+        const e = r.webhookSubscriptionCreate.userErrors; if (e.length) throw new Error("Webhook " + topic + ": " + e.map((x: { message: string }) => x.message).join("; "));
+        made.push(topic);
+      }
+      out.webhook = made.length ? "created" : "already set up";
+      if (made.length) out.webhooks_created = made;
     }
 
     // What to push: everything, or just the given parts / models.

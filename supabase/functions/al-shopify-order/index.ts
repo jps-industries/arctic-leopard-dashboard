@@ -1,4 +1,7 @@
-// Shopify "Order payment" webhook -> Arctic Leopard dashboard.
+// Shopify webhooks -> Arctic Leopard dashboard: "Order payment" (orders/paid), "Refund create" (refunds/create)
+// and "Order cancellation" (orders/cancelled), told apart by the X-Shopify-Topic header.
+// Refunds: restocked part lines go back into stock, refunded bikes are released back to stock (unless already
+// handed over), pre-orders are marked refunded, and the order's refunded amount / bike count reduce commission.
 // Discount codes are saved on the order so affiliate / creator codes count sales and commission.
 // Parts come out of stock, the customer is created or matched (or the dealer, by email),
 // bike orders reserve the next in-stock bike of that model (or become a pre-order if none).
@@ -33,7 +36,15 @@ Deno.serve(async (req) => {
   const raw = new Uint8Array(await req.arrayBuffer());
   if (!(await validHmac(raw, req.headers.get("x-shopify-hmac-sha256")))) return new Response("bad signature", { status: 401 });
 
-  const order = JSON.parse(new TextDecoder().decode(raw));
+  const topic = (req.headers.get("x-shopify-topic") || "orders/paid").toLowerCase();
+  const payload = JSON.parse(new TextDecoder().decode(raw));
+  if (topic === "refunds/create") return await handleRefund(payload);
+  if (topic === "orders/cancelled") {
+    const r = await db.from("al_shopify_orders").update({ cancelled_at: payload.cancelled_at || new Date().toISOString() }).eq("shopify_order_id", String(payload.id));
+    if (r.error) { console.error(r.error); return new Response("error", { status: 500 }); }
+    return new Response("ok");
+  }
+  const order = payload;
   const orderId = String(order.id);
   // Already processed? Shopify retries webhooks, so this must be idempotent.
   const seen = must(await db.from("al_shopify_orders").select("shopify_order_id").eq("shopify_order_id", orderId).maybeSingle());
@@ -126,3 +137,81 @@ Deno.serve(async (req) => {
     return new Response("error", { status: 500 });
   }
 });
+
+async function matchLine(li: { sku?: string; product_id?: number | string }) {
+  const sku = typeof li.sku === "string" && li.sku.trim() ? li.sku.trim() : null;
+  const pid = li.product_id ? String(li.product_id) : null;
+  let part = sku ? must(await db.from("al_parts").select("id").eq("sku", sku).limit(1)) : [];
+  if (!part.length && pid) part = must(await db.from("al_parts").select("id").eq("shopify_product_id", pid).limit(1));
+  if (part.length) return { part: part[0].id as number };
+  let model = sku ? must(await db.from("al_models").select("id").eq("sku", sku).limit(1)) : [];
+  if (!model.length && pid) model = must(await db.from("al_models").select("id").eq("shopify_product_id", pid).limit(1));
+  if (model.length) return { model: model[0].id as number };
+  return {};
+}
+
+// deno-lint-ignore no-explicit-any
+async function handleRefund(refund: any): Promise<Response> {
+  const refundId = String(refund.id), orderId = String(refund.order_id);
+  const amount = (refund.transactions || []).filter((t: { kind?: string; status?: string }) => t.kind === "refund" && t.status === "success").reduce((a: number, t: { amount?: string }) => a + (Number(t.amount) || 0), 0);
+  const claim = await db.from("al_shopify_refunds").insert({ refund_id: refundId, shopify_order_id: orderId, amount_aud: amount });
+  if (claim.error) return new Response("already processed");
+  try {
+    const ord = must(await db.from("al_shopify_orders").select("*").eq("shopify_order_id", orderId).maybeSingle());
+    const name = ord?.order_name || `#${orderId}`;
+    const date = (refund.processed_at || refund.created_at || new Date().toISOString()).slice(0, 10);
+    const notes: string[] = [];
+    let restocked = 0, released = 0, bikesRefunded = 0, partsAud = 0;
+    for (const rli of refund.refund_line_items || []) {
+      const li = rli.line_item || {}, qty = Number(rli.quantity) || 0;
+      if (qty <= 0) continue;
+      const m = await matchLine(li);
+      if (m.part) {
+        partsAud += Number(rli.subtotal) || (Number(li.price) || 0) * qty;
+        if (["return", "cancel", "legacy_restock"].includes(rli.restock_type)) {
+          must(await db.from("al_stock_movements").insert({ part_id: m.part, qty, kind: "returned", dealer_id: ord?.dealer_id ?? null, customer_id: ord?.customer_id ?? null, unit_price_aud: Number(li.price) || null, reference: `Refund Shopify ${name}`, moved_at: date, paid_date: date }));
+          restocked += qty;
+        } else notes.push(`${qty}x ${li.title || "part"} refunded without restock`);
+        continue;
+      }
+      if (m.model) {
+        bikesRefunded += qty;
+        for (let i = 0; i < qty; i++) {
+          // Pre-order for this order still open? Refund it and free its bike (if not handed over yet).
+          const pre = must(await db.from("al_preorders").select("id,bike_id,status").eq("shopify_order", name).eq("model_id", m.model).in("status", ["allocated", "deposit_paid", "enquiry"]).order("id").limit(1));
+          let bikeId: number | null = pre[0]?.bike_id ?? null;
+          if (pre.length) must(await db.from("al_preorders").update({ status: "refunded", notes: `Refunded in Shopify ${date}` }).eq("id", pre[0].id));
+          if (!bikeId) {
+            const b = must(await db.from("al_bikes").select("id").eq("model_id", m.model).eq("status", "reserved").like("notes", `Reserved by Shopify ${name} %`).order("id").limit(1));
+            bikeId = b[0]?.id ?? null;
+          }
+          if (bikeId) {
+            const b = must(await db.from("al_bikes").select("id,status,notes").eq("id", bikeId).single());
+            if (b.status === "reserved") {
+              const was = /\(was (pdi_done|in_stock|in_transit)\)/.exec(b.notes || "")?.[1] || "in_stock";
+              must(await db.from("al_bikes").update({ status: was, customer_id: null, dealer_id: null, sale_price_aud: null, paid_date: null, notes: `Released: Shopify ${name} refunded ${date}` }).eq("id", bikeId));
+              released++;
+            } else notes.push(`Bike ${bikeId} was already ${b.status}: refunded in Shopify, check it by hand`);
+          } else if (!pre.length) notes.push(`${li.title || "Bike"} refunded but no reserved bike or pre-order found`);
+        }
+        continue;
+      }
+      notes.push(`${qty}x ${li.title || "item"} refunded (not in dashboard)`);
+    }
+    must(await db.from("al_shopify_refunds").update({ parts_restocked: restocked, bikes_released: released, notes }).eq("refund_id", refundId));
+    if (ord) {
+      const refunded = Math.round(((Number(ord.refunded_aud) || 0) + amount) * 100) / 100;
+      must(await db.from("al_shopify_orders").update({
+        refunded_aud: refunded, refund_status: refunded >= (Number(ord.total_aud) || 0) - 0.005 ? "refunded" : "partial",
+        bikes_refunded: (Number(ord.bikes_refunded) || 0) + bikesRefunded,
+        parts_aud: Math.max(0, Math.round(((Number(ord.parts_aud) || 0) - partsAud) * 100) / 100),
+        refund_notes: [...(ord.refund_notes || []), ...notes],
+      }).eq("shopify_order_id", orderId));
+    }
+    return new Response("ok");
+  } catch (e) {
+    await db.from("al_shopify_refunds").delete().eq("refund_id", refundId);
+    console.error(e);
+    return new Response("error", { status: 500 });
+  }
+}
