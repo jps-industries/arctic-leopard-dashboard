@@ -47,9 +47,10 @@ button:disabled{opacity:.6;cursor:default}
     <div class="f"><label for="name">Full name <b>*</b></label><input id="name" name="name" autocomplete="name" required></div>
     <div class="f"><label for="phone">Phone <b>*</b></label><input id="phone" name="phone" type="tel" autocomplete="tel" required></div>
     <div class="f full"><label for="email">Email <b>*</b></label><input id="email" name="email" type="email" autocomplete="email" required></div>
-    <div class="f"><label for="suburb">Suburb</label><input id="suburb" name="suburb" autocomplete="address-level2"></div>
-    <div class="f"><label for="state">State</label><select id="state" name="state"><option value="">Select</option><option>WA</option><option>NSW</option><option>VIC</option><option>QLD</option><option>SA</option><option>TAS</option><option>ACT</option><option>NT</option></select></div>
-    <div class="f"><label for="postcode">Postcode</label><input id="postcode" name="postcode" inputmode="numeric" autocomplete="postal-code"></div>
+    <div class="f full"><label for="address">Street address <b>*</b></label><input id="address" name="address" autocomplete="street-address" required><span class="hint">Where we'd send parts if your claim needs them.</span></div>
+    <div class="f"><label for="suburb">Suburb <b>*</b></label><input id="suburb" name="suburb" autocomplete="address-level2" required></div>
+    <div class="f"><label for="state">State <b>*</b></label><select id="state" name="state" required><option value="">Select</option><option>WA</option><option>NSW</option><option>VIC</option><option>QLD</option><option>SA</option><option>TAS</option><option>ACT</option><option>NT</option></select></div>
+    <div class="f"><label for="postcode">Postcode <b>*</b></label><input id="postcode" name="postcode" inputmode="numeric" autocomplete="postal-code" required></div>
   </fieldset>
   <fieldset>
     <legend>Your bike</legend>
@@ -85,7 +86,7 @@ document.getElementById("files").onchange = e => {
 };
 f.onsubmit = async e => {
   e.preventDefault(); err.textContent = "";
-  for (const id of ["name", "phone", "email", "frame_no", "problem"]) {
+  for (const id of ["name", "phone", "email", "address", "suburb", "state", "postcode", "frame_no", "problem"]) {
     const el = document.getElementById(id);
     if (!el.value.trim()) { err.textContent = "Please fill in the fields marked *."; el.focus(); return; }
   }

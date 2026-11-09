@@ -1,15 +1,21 @@
 // Shopify "Order payment" webhook -> Arctic Leopard dashboard.
 // Parts come out of stock, the customer is created or matched (or the dealer, by email),
 // bike orders reserve the next in-stock bike of that model (or become a pre-order if none).
-// Secret: AL_SHOPIFY_WEBHOOK_SECRET = the signing key shown under Shopify Settings > Notifications > Webhooks.
+// Signed with AL_SHOPIFY_CLIENT_SECRET when the webhook is registered by the dashboard's Shopify app,
+// or AL_SHOPIFY_WEBHOOK_SECRET (the key under Shopify Settings > Notifications > Webhooks) if made by hand.
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
-const SECRET = Deno.env.get("AL_SHOPIFY_WEBHOOK_SECRET") ?? "";
+const SECRETS = [Deno.env.get("AL_SHOPIFY_CLIENT_SECRET"), Deno.env.get("AL_SHOPIFY_WEBHOOK_SECRET")].filter((x): x is string => !!x);
 
 async function validHmac(raw: Uint8Array, header: string | null): Promise<boolean> {
-  if (!SECRET || !header) return false;
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  if (!header) return false;
+  for (const s of SECRETS) if (await hmacMatches(s, raw, header)) return true;
+  return false;
+}
+
+async function hmacMatches(secret: string, raw: Uint8Array, header: string): Promise<boolean> {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, raw));
   const b64 = btoa(String.fromCharCode(...sig));
   if (b64.length !== header.length) return false;

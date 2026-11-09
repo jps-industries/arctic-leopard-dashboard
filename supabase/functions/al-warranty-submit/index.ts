@@ -21,7 +21,9 @@ Deno.serve(async (req) => {
 
   const name = clip(f.get("name"), 120), email = clip(f.get("email"), 160)?.toLowerCase() ?? null, phone = clip(f.get("phone"), 40);
   const frame = clip(f.get("frame_no"), 60), problem = clip(f.get("problem"), 4000);
+  const addr = { address: clip(f.get("address"), 200), suburb: clip(f.get("suburb"), 80), state: clip(f.get("state"), 3), postcode: clip(f.get("postcode"), 8) };
   if (!name || !email || !phone || !frame || !problem) return json({ error: "Please fill in your name, email, phone, frame number and the problem." }, 400);
+  if (!addr.address || !addr.suburb || !addr.state || !addr.postcode) return json({ error: "Please fill in your full address so we can send parts if needed." }, 400);
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "That email address doesn't look right." }, 400);
   if (f.get("consent") !== "yes") return json({ error: "Please tick the box to confirm the details are correct." }, 400);
 
@@ -40,9 +42,16 @@ Deno.serve(async (req) => {
     let customerId: number;
     const c = await db.from("al_customers").select("id").ilike("email", like(email)).limit(1);
     if (c.error) throw c.error;
-    if (c.data.length) customerId = c.data[0].id;
-    else {
-      const ins = await db.from("al_customers").insert({ full_name: name, email, phone, suburb: clip(f.get("suburb"), 80), state: clip(f.get("state"), 3), postcode: clip(f.get("postcode"), 8), notes: "Created from the website warranty form" }).select("id").single();
+    if (c.data.length) {
+      customerId = c.data[0].id;
+      // Fill in details we don't have yet. Never overwrite from a public form (the claim keeps the address given).
+      const cur = await db.from("al_customers").select("phone,address,suburb,state,postcode").eq("id", customerId).single();
+      if (cur.error) throw cur.error;
+      const fill: Record<string, string> = {};
+      for (const [k, v] of Object.entries({ phone, ...addr })) if (v && !(cur.data as Record<string, unknown>)[k]) fill[k] = v;
+      if (Object.keys(fill).length) { const upd = await db.from("al_customers").update(fill).eq("id", customerId); if (upd.error) throw upd.error; }
+    } else {
+      const ins = await db.from("al_customers").insert({ full_name: name, email, phone, ...addr, notes: "Created from the website warranty form" }).select("id").single();
       if (ins.error) throw ins.error;
       customerId = ins.data.id;
     }
@@ -59,6 +68,7 @@ Deno.serve(async (req) => {
       purchase_date: purchase && /^\d{4}-\d{2}-\d{2}$/.test(purchase) ? purchase : bike?.sold_date ?? null,
       hours_km: clip(f.get("hours_km"), 40), category: cat && CATS.includes(cat) ? cat : null, problem,
       reported_frame_no: frame, reported_model: clip(f.get("model"), 60), purchased_from: clip(f.get("purchased_from"), 120),
+      ship_address: `${addr.address}, ${addr.suburb} ${addr.state} ${addr.postcode}`,
     }).select("id,claim_no").single();
     if (claim.error) throw claim.error;
 

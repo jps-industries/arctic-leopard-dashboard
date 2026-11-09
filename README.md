@@ -20,7 +20,17 @@ Edge function `al-shopify-order` (Supabase) receives Shopify's **Order payment**
 - for bikes (matched on `al_models.shopify_product_id`), reserves the next free bike of that model (PDI done, then in stock, then in transit) and records a pre-order; if none is free it creates a pre-order to allocate later;
 - logs the order in `al_shopify_orders`, including anything it couldn't match. Shopify retries are ignored.
 
-Setup: Shopify admin > Settings > Notifications > Webhooks > Create webhook, event **Order payment**, format JSON, URL `https://dobonmovezqepjgzfwmt.supabase.co/functions/v1/al-shopify-order`. Put the signing key shown on that page into the Supabase edge function secret `AL_SHOPIFY_WEBHOOK_SECRET`.
+Setup (recommended): create an app in the Shopify **Dev Dashboard** (dev.shopify.com), give it the scopes `read_products, read_inventory, write_inventory, read_locations, read_orders`, release a version and install it on the store. Then set Supabase edge function secrets `AL_SHOPIFY_SHOP` = `xr02jp-6s.myshopify.com`, `AL_SHOPIFY_CLIENT_ID` and `AL_SHOPIFY_CLIENT_SECRET` from the app's Settings page. On the dashboard, Parts > **Update Shopify stock** registers the Order payment webhook and pushes stock. Webhooks the app creates are signed with the client secret.
+
+Alternative: Shopify admin > Settings > Notifications > Webhooks > Create webhook, event **Order payment**, JSON, URL `https://dobonmovezqepjgzfwmt.supabase.co/functions/v1/al-shopify-order`, and put its signing key in `AL_SHOPIFY_WEBHOOK_SECRET`.
+
+## SKUs and Shopify stock
+
+Parts: `AL-XE-###`, `AL-XF-###`, `AL-XX-###` (fits both). Bike models: `AL-<model code>` (e.g. `AL-XE-PRO-R`), and each bike gets a unit number `AL-XE-PRO-R-001` (trigger `al_bike_unit_no`). The part and model SKUs are on the Shopify variants. Shopify sells by model, so `al-shopify-stock` sets each model's Shopify stock to bikes in stock/PDI done and not reserved, and each part's to its on-hand count. It runs after a shipment is received and from Parts > Update Shopify stock.
+
+## Factory invoices
+
+Shipments > Upload factory invoice creates a shipment from the factory PI. Excel files are read (header row with Description / Unit price / QTY; "Chinese — English" descriptions keep the English) and lines are linked to bike models by name and to parts by earlier lines with the same description; bike records are created per unit. PDFs are attached only. The file is stored in the private bucket under `shipments/<id>/`.
 
 Refunds and cancellations are not reversed automatically; adjust stock on the Parts tab.
 
