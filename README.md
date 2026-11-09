@@ -1,4 +1,4 @@
-# Arctic Leopard Australia Desk
+# Arctic Leopard Australia Dashboard
 
 Internal dashboard for Arctic Leopard Australia: shipments, bikes by frame number, parts stock, dealers, customers, pre-orders and warranty claims with an Excel parts request for the factory. A single `index.html` served by GitHub Pages, same pattern as Parts Desk.
 

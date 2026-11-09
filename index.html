@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="AL Desk">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23000'/%3E%3Ctext x='32' y='42' font-family='Impact,Arial Narrow,sans-serif' font-size='30' fill='%23e8eaea' text-anchor='middle' font-style='italic'%3EAL%3C/text%3E%3Crect y='58' width='64' height='6' fill='%23D7191F'/%3E%3C/svg%3E">
-<title>Arctic Leopard Desk</title>
+<title>Arctic Leopard Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&display=swap">
@@ -37,6 +37,7 @@ button{cursor:pointer}
 .wm{font-family:var(--brand);font-size:34px;line-height:1;letter-spacing:.02em;text-transform:uppercase;background:var(--chrome);-webkit-background-clip:text;background-clip:text;color:transparent;white-space:nowrap}
 .brand h1{margin:0;font-weight:500;font-size:19px;line-height:1.1}
 .brand p{margin:2px 0 0;color:var(--band-muted);font-size:12.5px}
+.logo{height:76px;width:auto;display:block}
 .divider{width:1px;align-self:stretch;background:var(--band-line)}
 .hdr-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;color:var(--band-muted);font-size:12.5px}
 .band .btn{border-color:#555;color:var(--band-ink)}
@@ -147,7 +148,7 @@ tr.sel td{background:var(--accent-soft)}td.selc{cursor:default}td.selc input,#se
 @media (max-width:900px){.grid2{grid-template-columns:1fr}.strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:600px){
 .strip.s4{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .wm{font-size:26px}.divider{display:none}.brand h1{font-size:17px}
+  .wm{font-size:26px}.logo{height:48px}.divider{display:none}.brand h1{font-size:17px}
   .strip{grid-template-columns:repeat(2,minmax(0,1fr))}.stat .n{font-size:26px}
   .form,.checks{grid-template-columns:1fr}
   .tools select{flex:1 1 40%;max-width:none}
@@ -159,9 +160,9 @@ tr.sel td{background:var(--accent-soft)}td.selc{cursor:default}td.selc input,#se
 <header class="band">
   <div class="top">
     <div class="brand">
-      <span class="wm">Arctic Leopard</span>
+      <img class="logo" src="logo.png" alt="Arctic Leopard">
       <span class="divider"></span>
-      <div><h1>Australia Desk</h1><p>Stock, dealers and warranty</p></div>
+      <div><h1>Dashboard</h1><p>Stock, dealers and warranty</p></div>
     </div>
     <div class="hdr-right" id="hdrRight" hidden>
       <span id="who"></span>
