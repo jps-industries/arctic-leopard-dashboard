@@ -36,7 +36,7 @@ Refunds and cancellations are not reversed automatically; adjust stock on the Pa
 
 ## Website warranty form
 
-`claim.html` is a public form (no login) that posts to the edge function `al-warranty-submit`, which creates the customer, a New claim marked Website, and stores the photos and proof of purchase in the private bucket. To put it on the Shopify warranty page, add a **Custom Liquid** section with:
+`claim.html` is a public form (no login) that posts to the edge function `al-warranty-submit`, which creates the customer, a New claim marked Website, and stores the photos and proof of purchase in the private bucket. It then posts the claim to a Zapier webhook (workflow "Arctic Leopard warranty claim emails"), which emails the customer a confirmation and the team an alert from contact@arcticleopardaustralia.com. The hook URL and its key live in the private `al_settings` table (`zapier_claim_hook`, `zapier_claim_key`), not in this repo. To put it on the Shopify warranty page, add a **Custom Liquid** section with:
 
 ```html
 <div style="width:760px;max-width:calc(100vw - 32px);margin:0 auto">
