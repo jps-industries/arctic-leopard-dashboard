@@ -125,6 +125,9 @@ td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
 .media{display:flex;flex-wrap:wrap;gap:8px}
 .media a{display:block;width:96px;height:96px;border:1px solid var(--line);background:var(--surface-2) center/cover no-repeat;position:relative;font-size:11px;color:var(--muted);text-decoration:none;overflow:hidden}
 tr.sel td{background:var(--accent-soft)}td.selc{cursor:default}td.selc input,#selAll{accent-color:var(--accent)}
+a.btn{text-decoration:none;color:var(--ink)}a.btn.primary{color:var(--accent-ink)}
+.wl{display:flex;gap:5px;align-items:center;margin-top:4px;color:var(--muted);font-size:12px;white-space:nowrap}
+.cardacts{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.mailbox{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.mailbox:empty{display:none}.mailbox a.small{color:var(--muted);margin-right:6px}
 .mtile{position:relative}.mdel{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;border:0;background:rgba(0,0,0,.65);color:#fff;font-size:15px;line-height:22px;padding:0;cursor:pointer}.mdel:hover{background:var(--accent)}
 .logact{float:right;font-size:12px;display:flex;gap:10px}
 .media a span{position:absolute;left:0;right:0;bottom:0;background:rgba(255,255,255,.85);padding:1px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -259,6 +262,12 @@ async function loadAll() {
   ]);
   Object.assign(S.d, { models, dealers, customers, shipments, lines, parts, bikes, claims, wparts, preorders, pdi, orders, loans, codeOrders, staff });
 }
+// Compose an email from the Arctic Leopard Gmail with the claim number as the subject.
+const TEAM_MAIL = "contact@arcticleopardaustralia.com";
+const gmailLink = (to, subject, body) => `https://mail.google.com/mail/?authuser=${encodeURIComponent(TEAM_MAIL)}&view=cm&fs=1&to=${encodeURIComponent(to || "")}&su=${encodeURIComponent(subject || "")}&body=${encodeURIComponent(body || "")}`;
+const mailtoLink = (to, subject, body) => `mailto:${encodeURIComponent(to || "")}?subject=${encodeURIComponent(subject || "")}&body=${encodeURIComponent(body || "")}`;
+const backBar = back => back ? `<button type="button" class="linkbtn" id="backBtn" style="align-self:flex-start">← ${esc(back.label)}</button>` : "";
+const wireBack = (dr, back) => { const b = dr.querySelector("#backBtn"); if (b && back) b.onclick = back.fn; };
 const staffName = email => { if (!email) return ""; const st = (S.d.staff || []).find(x => x.email.toLowerCase() === email.toLowerCase()); return st && st.name ? st.name : email.split("@")[0]; };
 const model = id => byId(S.d.models, id) || {};
 const refundNote = o => (+o.refunded_aud || o.cancelled_at) ? `<div class="low">${o.refund_status === "refunded" ? "Refunded" : +o.refunded_aud ? "Part refunded" : "Cancelled"}${+o.refunded_aud ? " " + money(o.refunded_aud, 2) : ""}${o.cancelled_at && +o.refunded_aud ? " · cancelled" : ""}${(o.refund_notes || []).length ? ": " + o.refund_notes.map(esc).join("; ") : ""}</div>` : "";
@@ -472,6 +481,7 @@ VIEWS.shipments = () => {
   document.querySelectorAll("tr[data-id]").forEach(r => r.onclick = () => openShipment(+r.dataset.id));
 };
 const SHIP_F = [["ref","Name"],["pi_number","PI / invoice no."],["kind","Type","select",{options:[["bikes","Bikes"],["parts","Parts"],["mixed","Mixed"]],blank:false}],["freight_mode","Freight","select",{options:[["sea","Sea"],["air","Air"],["courier","Courier"]]}],["status","Status","select",{options:opt(SHIP_ST),blank:false}],["invoice_date","Invoice date","date"],["eta","ETA","date"],["arrived_at","Arrived","date"],["invoice_aud","Invoice total AUD","number"],["fx_rate","Exchange rate used (AUD per USD)","number"],["freight_aud","Freight AUD","number"],["duty_aud","Duty and fees AUD","number"],["notes","Notes","textarea"]];
+const recvMsg = x => `Received: ${x.bikes} bikes to stock, ${x.parts} parts added to stock` + (x.warranty ? `, ${x.warranty} warranty parts matched to ${(x.claims || []).join(", ")}` : "");
 function openShipment(id) {
   const s = id ? byId(S.d.shipments, id) : { kind: "bikes", status: "ordered", fx_rate: 1.4243 };
   const ls = id ? S.d.lines.filter(l => l.shipment_id === id) : [];
@@ -479,11 +489,12 @@ function openShipment(id) {
   const partName = pid => (byId(S.d.parts, pid) || {}).name || "";
   const invHtml = id ? `<div class="section"><h4>Factory invoice <label class="btn sm" style="cursor:pointer">${s.invoice_path ? "Replace" : "Upload"} (PDF or Excel)<input type="file" id="invUp" accept=".xlsx,.xls,.csv,application/pdf" hidden></label></h4>
     <div class="small">${s.invoice_path ? `<button class="linkbtn" id="invOpen">${esc(s.invoice_path.split("/").pop())}</button>` : `<span class="muted">No invoice attached. An Excel invoice also fills in the lines.</span>`}</div></div>` : "";
-  const linesHtml = id ? invHtml + `<div class="section"><h4>Lines <span><button class="btn sm" id="addLine">+ Add line</button></span></h4>
+  const linesHtml = id ? invHtml + `<div class="section"><h4>Lines <span style="display:flex;gap:6px"><button class="btn sm" id="addWarr" title="Add the factory warranty parts we've requested and not yet received">+ Requested warranty parts</button><button class="btn sm" id="addLine">+ Add line</button></span></h4>
     <table><thead><tr><th>Item</th><th>Linked to</th><th class="r">Qty</th><th class="r">Unit AUD</th><th class="r">Recv</th><th></th></tr></thead><tbody>
-    ${ls.map(l => `<tr><td>${esc(l.description)}${l.spec ? `<div class="small muted">${esc(l.spec)}</div>` : ""}${l.notes ? `<div class="small" style="color:var(--amber)">${esc(l.notes)}</div>` : ""}</td><td class="small">${l.model_id ? esc(model(l.model_id).name) : l.part_id ? esc(partName(l.part_id).replace(/^(TECH )?Arctic Leopard /, "")) : `<input class="linkpart" data-line="${l.id}" list="partList" placeholder="Not linked: pick a part" style="min-width:200px">`}</td><td class="r">${l.qty}</td><td class="r">${money(aud(l.unit_usd, s.fx_rate), 2)}</td><td class="r">${l.part_id ? l.qty_received : l.model_id ? "" : ""}</td><td><button class="rm" data-rml="${l.id}" title="Remove line">×</button></td></tr>`).join("")}
+    ${ls.map(l => `<tr><td>${esc(l.description)}${l.spec ? `<div class="small muted">${esc(l.spec)}</div>` : ""}${l.notes ? `<div class="small" style="color:var(--amber)">${esc(l.notes)}</div>` : ""}</td><td class="small">${l.model_id ? esc(model(l.model_id).name) : l.part_id ? esc(partName(l.part_id).replace(/^(TECH )?Arctic Leopard /, "")) : `<input class="linkpart" data-line="${l.id}" list="partList" placeholder="Not linked: pick a part" style="min-width:200px">`}${l.model_id ? "" : `<label class="wl"><input type="checkbox" data-wl="${l.id}"${l.for_warranty ? " checked" : ""}${l.qty_received >= l.qty && l.qty_received ? " disabled" : ""}> Warranty part</label>`}</td><td class="r">${l.qty}</td><td class="r">${money(aud(l.unit_usd, s.fx_rate), 2)}</td><td class="r">${l.part_id ? l.qty_received : l.model_id ? "" : ""}</td><td><button class="rm" data-rml="${l.id}" title="Remove line">×</button></td></tr>`).join("")}
     </tbody></table>
     <div id="lineForm" hidden></div>
+    <p class="small muted" style="margin:0">Lines ticked <b>Warranty part</b> don't go into stock when received: they're matched to the claims waiting for that part (oldest first), marked Received there and noted in the claim's log. Any extra goes into stock.</p>
     <p class="small muted" style="margin:0">${bikesIn.length} bike records on this shipment. ${ls.some(l => l.model_id) ? `<button class="linkbtn" id="mkBikes">Create missing bike records from the lines</button>` : ""}</p></div>` : `<p class="small muted">Save the shipment first, then add its lines.</p>`;
   s.invoice_aud = aud(s.usd_total, s.fx_rate);
   const dr = drawer({ title: id ? s.ref : "New shipment", wide: true, body: fieldsHtml(SHIP_F, s) + linesHtml,
@@ -494,16 +505,27 @@ function openShipment(id) {
     const receiving = id && row.status === "received" && s.status !== "received";
     if (receiving) row.status = s.status;
     const r = await saveRow("al_shipments", id, row);
-    if (receiving) { const x = await q(sb.rpc("al_receive_shipment", { p_shipment_id: id, p_date: row.arrived_at || today() })); closeDrawer(); await rerender(); toast(`Received: ${x.bikes} bikes to stock, ${x.parts} parts added`); return pushShopifyStock(); }
+    if (receiving) { const x = await q(sb.rpc("al_receive_shipment", { p_shipment_id: id, p_date: row.arrived_at || today() })); closeDrawer(); await rerender(); toast(recvMsg(x)); return pushShopifyStock(); }
     toast("Saved"); await loadAll(); render(); if (!id) openShipment(r.id); else closeDrawer(); });
   armDelete(dr, async () => { if (bikesIn.length) throw new Error("Move or delete its bike records first"); await q(sb.from("al_shipments").delete().eq("id", id)); });
   const rb = dr.querySelector("#recvBtn");
   if (rb) rb.onclick = guard(async () => {
     if (!rb.dataset.armed) { rb.dataset.armed = 1; rb.textContent = "Confirm: bikes to stock, parts into stock"; return; }
     const r = await q(sb.rpc("al_receive_shipment", { p_shipment_id: id, p_date: today() }));
-    closeDrawer(); await rerender(); toast(`Received: ${r.bikes} bikes to stock, ${r.parts} parts added`); pushShopifyStock();
+    closeDrawer(); await rerender(); toast(recvMsg(r)); pushShopifyStock();
   });
   dr.querySelectorAll("[data-rml]").forEach(b => b.onclick = guard(async () => { await q(sb.from("al_shipment_lines").delete().eq("id", +b.dataset.rml)); await loadAll(); openShipment(id); }));
+  dr.querySelectorAll("[data-wl]").forEach(cbx => cbx.onchange = guard(async () => { await q(sb.from("al_shipment_lines").update({ for_warranty: cbx.checked }).eq("id", +cbx.dataset.wl)); const l = ls.find(x => x.id === +cbx.dataset.wl); if (l) l.for_warranty = cbx.checked; toast(cbx.checked ? "Marked as warranty part" : "Back to stock part"); }));
+  const aw = dr.querySelector("#addWarr");
+  if (aw) aw.onclick = guard(async () => {
+    const want = S.d.wparts.filter(w => w.source === "factory" && w.status === "requested");
+    if (!want.length) throw new Error("No factory warranty parts are waiting (status Requested)");
+    const groups = {}; for (const w of want) { const k = w.part_id ? "p" + w.part_id : "d" + (w.description || "").toLowerCase(); (groups[k] ||= { part_id: w.part_id || null, description: w.part_id ? partName(w.part_id).replace(/^(TECH )?Arctic Leopard /, "") : w.description, qty: 0 }).qty += w.qty; }
+    const already = ls.filter(l => l.for_warranty);
+    const rows = Object.values(groups).filter(g => !already.some(l => (g.part_id && l.part_id === g.part_id) || (!g.part_id && (l.description || "").toLowerCase() === (g.description || "").toLowerCase()))).map(g => ({ shipment_id: id, part_id: g.part_id, description: g.description || "Warranty part", qty: g.qty, for_warranty: true }));
+    if (!rows.length) throw new Error("Those warranty parts are already on this shipment");
+    await q(sb.from("al_shipment_lines").insert(rows)); await loadAll(); openShipment(id); toast(`${rows.length} warranty line${rows.length === 1 ? "" : "s"} added`);
+  });
   if (id && dr.querySelector(".linkpart")) dr.insertAdjacentHTML("beforeend", partDatalist());
   dr.querySelectorAll(".linkpart").forEach(inp => inp.onchange = guard(async () => { const p = partFromInput(inp.value); if (!p) throw new Error("Pick a part from the list"); await q(sb.from("al_shipment_lines").update({ part_id: p.id }).eq("id", +inp.dataset.line)); await loadAll(); openShipment(id); toast("Linked"); }));
   const iu = dr.querySelector("#invUp");
@@ -775,6 +797,9 @@ function openBike(id) {
   dr.querySelectorAll("[data-l]").forEach(x => x.onclick = () => openLoan(+x.dataset.l));
   const lb = dr.querySelector("#loanBtn"); if (lb) lb.onclick = () => openLoan(null, { bike_id: id });
   const cb = dr.querySelector("#claimBtn"); if (cb) cb.onclick = () => openClaim(null, { bike_id: id, customer_id: b.customer_id, dealer_id: b.dealer_id, purchase_date: b.sold_date });
+  // Dealer picked and no price yet: fill in the store price less their bike discount.
+  const bd = dr.querySelector("#f_dealer_id"), bp = dr.querySelector("#f_sale_price_aud");
+  if (bd && bp) bd.addEventListener("change", () => { const de = byId(S.d.dealers, +bd.value), sp = model(+dr.querySelector("#f_model_id").value).store_price_aud; if (de && de.discount_bikes_pct != null && sp && !bp.value) { bp.value = Math.round(sp * (1 - de.discount_bikes_pct / 100)); toast(`Price set to store price less ${de.discount_bikes_pct}%`); } });
 }
 function openFrameEntry() {
   const opts = S.d.models.map(m => { const n = S.d.bikes.filter(b => b.model_id === m.id && !b.frame_no).length; return n ? `<option value="${m.id}">${esc(m.name)} (${n} without frame no.)</option>` : ""; }).join("");
@@ -848,8 +873,8 @@ async function openPart(id) {
     foot: `${id ? delBtn() : "<span></span>"}<button class="btn primary" id="saveBtn">Save details</button>` });
   if (id) {
     const k = dr.querySelector("#mv_k");
-    const sync = () => { dr.querySelector("#mv_dw").hidden = k.value !== "to_dealer"; dr.querySelector("#mv_cw").hidden = k.value !== "sold_retail"; const pr = dr.querySelector("#mv_p"); if (k.value === "to_dealer") pr.value = p.dealer_price_aud ?? ""; else if (k.value === "sold_retail") pr.value = p.rrp_aud ?? ""; else pr.value = ""; };
-    k.onchange = sync; sync();
+    const sync = () => { dr.querySelector("#mv_dw").hidden = k.value !== "to_dealer"; dr.querySelector("#mv_cw").hidden = k.value !== "sold_retail"; const pr = dr.querySelector("#mv_p"); if (k.value === "to_dealer") { const de = byId(S.d.dealers, +dr.querySelector("#mv_d").value); pr.value = de && de.discount_parts_pct != null && p.rrp_aud != null ? Math.round(p.rrp_aud * (1 - de.discount_parts_pct / 100) * 100) / 100 : p.dealer_price_aud ?? ""; } else if (k.value === "sold_retail") pr.value = p.rrp_aud ?? ""; else pr.value = ""; };
+    k.onchange = sync; dr.querySelector("#mv_d").onchange = sync; sync();
     dr.querySelector("#mv_go").onclick = guard(async () => {
       const sign = MOVE_KINDS[k.value][1]; let n = Math.trunc(+$("#mv_q").value); if (!n) throw new Error("Enter a quantity");
       if (sign) n = Math.abs(n) * sign;
@@ -899,7 +924,7 @@ async function openClaim(id, preset) {
   let urls = {};
   if (media.length) { const r = await sb.storage.from(BUCKET).createSignedUrls(media.map(m => m.storage_path), 3600); (r.data || []).forEach((u, i) => urls[media[i].id] = u.signedUrl); }
   const dr = drawer({ title: id ? `Claim ${c.claim_no}` : "New warranty claim", wide: true,
-    body: soldByList() + `<div id="frameMatch" class="small muted"></div>` + (c.source === "web_form" && !c.model_id && c.reported_model ? `<div class="section" style="border-top:0;padding-top:0"><h4>Submitted on the website</h4><dl class="kv"><dt>Model given</dt><dd>${esc(c.reported_model || "—")}</dd></dl></div>` : "") + fieldsHtml(CLAIM_F(), c) +
+    body: (id ? `<div id="mailBox" class="mailbox"></div>` : "") + soldByList() + `<div id="frameMatch" class="small muted"></div>` + (c.source === "web_form" && !c.model_id && c.reported_model ? `<div class="section" style="border-top:0;padding-top:0"><h4>Submitted on the website</h4><dl class="kv"><dt>Model given</dt><dd>${esc(c.reported_model || "—")}</dd></dl></div>` : "") + fieldsHtml(CLAIM_F(), c) +
       `<div class="section"><h4>Parts needed <button class="linkbtn" id="addWp" type="button">+ Add part</button></h4>${partDatalist()}<div class="plines" id="wpList"></div>
       <p class="small muted" style="margin:0">"From factory" parts go on the factory request. "From our stock" parts come out of stock when marked Fitted.</p></div>` +
       `<div class="section" id="shipSec"><h4>Shipping to the customer <span id="trackLink"></span></h4>${fieldsHtml(CLAIM_SHIP_F, c)}<p class="small muted" style="margin:0">Set status to "Shipped to customer" with the tracking number. Mark "Customer received" before closing the claim.</p></div>` +
@@ -963,8 +988,29 @@ async function openClaim(id, preset) {
   dr.querySelector("#f_ship_carrier").onchange = drawTrack; dr.querySelector("#f_ship_tracking").oninput = drawTrack; showShip(); drawTrack();
   const cs = dr.querySelector("#f_customer_id");
   cs.insertAdjacentHTML("afterend", `<div id="custAddr" class="small muted"></div>`);
-  const drawAddr = () => { const cu = byId(S.d.customers, +cs.value); dr.querySelector("#custAddr").innerHTML = !cu ? "" : `${esc(fullAddr(cu) || "No address on file yet")}${cu.phone ? " · " + esc(cu.phone) : ""}${cu.email ? " · " + esc(cu.email) : ""} · <button type="button" class="linkbtn" id="editCust">Customer profile</button>`; const ec = dr.querySelector("#editCust"); if (ec) ec.onclick = () => openCustomer(cu.id); };
-  cs.addEventListener("change", drawAddr); drawAddr();
+  const back = id ? { label: `Back to claim ${c.claim_no}`, fn: () => openClaim(id) } : null;
+  const drawAddr = () => { const cu = byId(S.d.customers, +cs.value); dr.querySelector("#custAddr").innerHTML = !cu ? "" : `${esc(fullAddr(cu) || "No address on file yet")}${cu.phone ? " · " + esc(cu.phone) : ""}${cu.email ? " · " + esc(cu.email) : ""}<div class="cardacts">${id ? `<button type="button" class="btn sm" id="openCust">Open profile</button><button type="button" class="btn sm" id="editCust">Edit details</button>` : `<span>Save the claim to open the profile</span>`}</div>`;
+    const oc = dr.querySelector("#openCust"); if (oc) oc.onclick = () => openCustomer(cu.id, back);
+    const ec = dr.querySelector("#editCust"); if (ec) ec.onclick = () => openCustomer(cu.id, back, true); drawMail(); };
+  cs.addEventListener("change", drawAddr);
+  const ds = dr.querySelector("#f_dealer_id");
+  ds.insertAdjacentHTML("afterend", `<div id="dealerInfo" class="small muted"></div>`);
+  const drawDealer = () => { const de = byId(S.d.dealers, +ds.value); dr.querySelector("#dealerInfo").innerHTML = !de ? "" : `${esc([de.contact_name, de.phone, de.email].filter(Boolean).join(" · ") || "No contact details yet")}${id ? `<div class="cardacts"><button type="button" class="btn sm" id="openDealer">Open dealer profile</button></div>` : ""}`;
+    const od = dr.querySelector("#openDealer"); if (od) od.onclick = () => openDealer(de.id, back); drawMail(); };
+  ds.addEventListener("change", drawDealer);
+  // Email buttons (top of the claim): Gmail from the Arctic Leopard account, subject = claim number.
+  function drawMail() {
+    const box = dr.querySelector("#mailBox"); if (!box) return;
+    const cu = byId(S.d.customers, +cs.value), de = byId(S.d.dealers, +ds.value);
+    const subj = `Warranty claim ${c.claim_no}` + (claimModel(c) ? ` · ${claimModel(c)}` : "");
+    const who = [];
+    if (cu && cu.email) who.push(["customer", cu.email, (cu.full_name || "").split(" ")[0]]);
+    if (de && de.email) who.push(["dealer", de.email, (de.contact_name || de.business_name || "").split(" ")[0]]);
+    box.innerHTML = !id ? "" : who.length ? who.map(([k, em, first]) => { const body = `Hi ${first || "there"},\n\nRe your warranty claim ${c.claim_no}:\n\n\n\nKind regards,\nArctic Leopard Australia\n0457 416 969`; return `<a class="btn sm${k === "customer" || who.length === 1 ? " primary" : ""}" target="_blank" rel="noopener" href="${esc(gmailLink(em, subj, body))}" data-mail="${k}">Email ${k}</a><a class="small" href="${esc(mailtoLink(em, subj, body))}" title="Open in your computer's mail app instead">mail app</a>`; }).join("")
+      : `<span class="small muted">No email on file for the customer${de ? " or dealer" : ""}.</span>`;
+    box.querySelectorAll("[data-mail]").forEach(a => a.addEventListener("click", () => { const t = dr.querySelector("#logText"); if (t && !t.value.trim()) t.value = `Emailed ${a.dataset.mail} (${a.dataset.mail === "customer" ? cu.email : de.email})`; }));
+  }
+  drawAddr(); drawDealer();
   dr.querySelector("#saveBtn").onclick = guard(async () => {
     const row = Object.assign(readFields(CLAIM_F()), readFields(CLAIM_SHIP_F));
     if (row.status === "shipped" && !row.ship_tracking) throw new Error("Add the tracking number for the parcel");
@@ -1067,7 +1113,7 @@ function downloadXlsx(name, sheets, title) {
 /* ======================================================================
    DEALERS / CUSTOMERS / PRE-ORDERS
    ====================================================================== */
-const DEALER_F = [["business_name","Business name"],["status","Status","select",{options:opt(DEALER_ST),blank:false}],["contact_name","Contact"],["phone","Phone","tel"],["email","Email","email"],["state","State","select",{options:stateOpts()}],["territory","Territory"],["discount_pct","Discount %","number"],["address","Address","text",{full:1}],["notes","Notes","textarea"]];
+const DEALER_F = [["business_name","Business name"],["status","Status","select",{options:opt(DEALER_ST),blank:false}],["contact_name","Contact"],["phone","Phone","tel"],["email","Email","email"],["state","State","select",{options:stateOpts()}],["territory","Territory"],["discount_bikes_pct","Bike discount % (off store price)","number"],["discount_parts_pct","Parts discount % (off RRP)","number"],["address","Address","text",{full:1}],["notes","Notes","textarea"]];
 VIEWS.dealers = () => {
   const d = S.d;
   view(`<div class="tools"><p class="hint" style="margin:0;flex:1">Dealers and prospects. Click a dealer for their profile: purchases, margin, warranty claims, demo bikes and a notes log.</p><button class="btn primary" id="newD">+ Dealer</button></div>
@@ -1078,7 +1124,7 @@ VIEWS.dealers = () => {
   document.querySelectorAll("tr[data-id]").forEach(r => r.onclick = () => openDealer(+r.dataset.id));
 };
 // Dealer profile. Prices are as entered (inc GST); margin = price ex GST minus landed cost.
-async function openDealer(id) {
+async function openDealer(id, back) {
   const x = byId(S.d.dealers, id); if (!x) return;
   const [moves, notes] = await Promise.all([q(sb.from("al_stock_movements").select("*").eq("dealer_id", id).order("moved_at", { ascending: false })), q(sb.from("al_dealer_notes").select("*").eq("dealer_id", id))]);
   const exG = v => v == null ? null : +v / 1.1;
@@ -1095,7 +1141,7 @@ async function openDealer(id) {
   const owing = rows.filter(r => !r.paid && r.price).reduce((a, r) => a + r.price, 0);
   const loans = (S.d.loans || []).filter(l => l.dealer_id === id), pre = S.d.preorders.filter(p => p.dealer_id === id);
   const dr = drawer({ title: x.business_name, wide: true,
-    body: `<div class="small muted">${pill(DEALER_ST, x.status)}${x.discount_pct != null ? ` <b style="color:var(--ink)">${x.discount_pct}% dealer discount</b> ·` : ""} ${esc([x.contact_name, x.phone, x.email].filter(Boolean).join(" · "))}${x.territory || x.state ? `<br>${esc([x.territory, x.state].filter(Boolean).join(", "))}` : ""}</div>
+    body: backBar(back) + `<div class="small muted">${pill(DEALER_ST, x.status)}${x.discount_bikes_pct != null || x.discount_parts_pct != null ? ` <b style="color:var(--ink)">Discount: ${x.discount_bikes_pct ?? "—"}% bikes · ${x.discount_parts_pct ?? "—"}% parts</b> ·` : ""} ${esc([x.contact_name, x.phone, x.email].filter(Boolean).join(" · "))}${x.territory || x.state ? `<br>${esc([x.territory, x.state].filter(Boolean).join(", "))}` : ""}</div>
     <div class="strip s4" style="margin:0"><div class="stat"><div class="n">${money(spend) || "$0"}</div><div class="l">Total spend · ${bikeRows.length} bike${bikeRows.length === 1 ? "" : "s"}</div></div><div class="stat"><div class="n"${owing ? ' style="color:var(--red)"' : ""}>${money(owing) || "$0"}</div><div class="l">Balance owing</div></div><div class="stat"><div class="n">${withM.length ? money(marg) : "—"}</div><div class="l">Our margin${mBase ? ` · ${Math.round(marg / mBase * 100)}%` : ""}</div></div><div class="stat"><div class="n"${openC.length ? ' style="color:var(--red)"' : ""}>${openC.length}/${claims.length}</div><div class="l">Claims open / total</div></div></div>
     <div class="section"><h4>Purchase history <small class="muted">${bikeRows.length} bikes · ${partRows.reduce((a, r) => a + r.qty, 0)} parts</small></h4>${rows.length ? `<div class="tablewrap"><table style="min-width:0"><thead><tr><th>Date</th><th>Item</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Margin</th><th>Paid</th></tr></thead><tbody>${rows.map(r => `<tr${r.bike ? ` class="click" data-bk="${r.bike}"` : ""}><td class="small">${fdate(r.date) || "—"}</td><td>${esc(r.what)} <span class="small muted">${esc(r.status)}</span></td><td class="r">${r.qty}</td><td class="r">${money(r.price)}</td><td class="r">${r.margin == null ? `<span class="muted">—</span>` : `<span style="color:var(${r.margin < 0 ? "--red" : "--green"})">${money(r.margin)}</span>`}</td><td class="paidc"><label class="checkrow" style="gap:6px;white-space:nowrap"><input type="checkbox" data-paid="${r.key}"${r.paid ? " checked" : ""}> <span class="small ${r.paid ? "muted" : ""}" style="${r.paid ? "" : "color:var(--red)"}">${r.paid ? fdate(r.paid) : r.price ? "Owing" : ""}</span></label></td></tr>`).join("")}</tbody></table></div><p class="small muted" style="margin:6px 0 0">Prices as entered (inc GST). Margin = price ex GST minus landed cost. Tick Paid when they pay; Shopify orders are ticked automatically.</p>` : `<p class="small muted" style="margin:0">Nothing bought yet. Bikes count when a bike is set to With dealer (or reserved) for them; parts count from Parts &gt; Record movement &gt; Dealer order, or their Shopify orders.</p>`}</div>
     ${pre.length ? `<div class="section"><h4>Pre-orders</h4>${pre.map(p => `<div class="small">${esc(model(p.model_id).name)} · ${pill(PRE_ST, p.status)} · deposit ${money(p.deposit_aud)} ${fdate(p.deposit_date)}</div>`).join("")}</div>` : ""}
@@ -1104,7 +1150,7 @@ async function openDealer(id) {
     <div class="section"><h4>Notes log</h4><div class="lognew"><input type="date" id="dnDate" value="${today()}"><textarea id="dnText" rows="2" placeholder="Calls, visits, agreements, pricing promised…"></textarea><button class="btn sm" id="dnAdd" type="button">Add note</button></div><ul class="events log" id="dnList"></ul></div>
     <div class="section"><h4>Details</h4></div>` + fieldsHtml(DEALER_F, x),
     foot: `${delBtn()}<button class="btn primary" id="saveBtn">Save details</button>` });
-  mobileLabels(dr);
+  mobileLabels(dr); wireBack(dr, back);
   let log = notes.slice(), editing = null;
   const drawNotes = () => {
     const ul = dr.querySelector("#dnList");
@@ -1169,7 +1215,7 @@ function wireNotes(dr, table, fk, fkId, notes) {
     const r = await sb.from(table).insert(row).select("*").single(); if (r.error) throw r.error; log.push({ created_at: new Date().toISOString(), ...r.data }); t.value = ""; dr.querySelector("#nlDate").value = today(); draw(); });
 }
 const notesSection = ph => `<div class="section"><h4>Notes log</h4><div class="lognew"><input type="date" id="nlDate" value="${today()}"><textarea id="nlText" rows="2" placeholder="${esc(ph)}"></textarea><button class="btn sm" id="nlAdd" type="button">Add note</button></div><ul class="events log" id="nlList"></ul></div>`;
-async function openCustomer(id) {
+async function openCustomer(id, back, focusEdit) {
   const c = byId(S.d.customers, id); if (!c) return;
   const [orders, moves, notes] = await Promise.all([
     q(sb.from("al_shopify_orders").select("*").eq("customer_id", id).order("ordered_at", { ascending: false })),
@@ -1179,7 +1225,7 @@ async function openCustomer(id) {
   const pre = S.d.preorders.filter(p => p.customer_id === id), parts = moves.filter(m => m.qty < 0 && !String(m.reference || "").startsWith("Shopify"));
   const spent = orders.reduce((a, o) => a + (+o.total_aud || 0) - (+o.refunded_aud || 0), 0) + bikes.filter(b => !orders.length && b.sale_price_aud).reduce((a, b) => a + +b.sale_price_aud, 0) + parts.reduce((a, m) => a + (m.unit_price_aud || 0) * -m.qty, 0);
   const dr = drawer({ title: c.full_name, wide: true,
-    body: `<div class="small muted">${esc([c.phone, c.email].filter(Boolean).join(" · "))}${fullAddr(c) ? `<br>${esc(fullAddr(c))}` : ""}<br>Customer since ${fdate(String(c.created_at || "").slice(0, 10)) || "—"}</div>
+    body: backBar(back) + `<div class="small muted">${esc([c.phone, c.email].filter(Boolean).join(" · "))}${fullAddr(c) ? `<br>${esc(fullAddr(c))}` : ""}<br>Customer since ${fdate(String(c.created_at || "").slice(0, 10)) || "—"}</div>
     <div class="strip s4" style="margin:0"><div class="stat"><div class="n">${bikes.length}</div><div class="l">Bikes</div></div><div class="stat"><div class="n">${money(spent)}</div><div class="l">Spent with us</div></div><div class="stat"><div class="n">${orders.length}</div><div class="l">Online orders</div></div><div class="stat"><div class="n"${openC.length ? ' style="color:var(--red)"' : ""}>${openC.length}/${claims.length}</div><div class="l">Claims open / total</div></div></div>
     <div class="section"><h4>Bikes</h4>${bikes.length ? `<table style="min-width:0"><tbody>${bikes.map(b => `<tr class="click" data-bk="${b.id}"><td>${esc(bikeLabel(b))}</td><td>${pill(BIKE_ST, b.status)}</td><td class="r">${money(b.sale_price_aud)}</td><td class="small muted">${fdate(b.sold_date)}</td></tr>`).join("")}</tbody></table>` : `<p class="small muted" style="margin:0">No bikes yet.</p>`}</div>
     ${pre.length ? `<div class="section"><h4>Pre-orders</h4>${pre.map(p => `<div class="small">${esc(model(p.model_id).name)} · ${pill(PRE_ST, p.status)} · deposit ${money(p.deposit_aud)} ${fdate(p.deposit_date)}</div>`).join("")}</div>` : ""}
@@ -1187,13 +1233,15 @@ async function openCustomer(id) {
     ${parts.length ? `<div class="section"><h4>Parts bought in store</h4><table style="min-width:0"><tbody>${parts.map(m => `<tr><td class="small">${fdate(m.moved_at)}</td><td>${esc(((byId(S.d.parts, m.part_id) || {}).name || "Part").replace(/^(TECH )?Arctic Leopard /, ""))}</td><td class="r">${-m.qty}</td><td class="r">${money((m.unit_price_aud || 0) * -m.qty, 2)}</td></tr>`).join("")}</tbody></table></div>` : ""}
     <div class="section"><h4>Warranty claims <button class="linkbtn" id="cClaim" type="button">+ Claim for this customer</button></h4>${claims.length ? `<table style="min-width:0"><tbody>${claims.map(x => `<tr class="click" data-c="${x.id}"><td class="mono">${esc(x.claim_no)}</td><td class="small">${esc(claimModel(x))} ${esc(claimFrame(x))}${x.dealer_id ? `<div class="muted">via ${esc(dealerName(x.dealer_id))}</div>` : ""}</td><td>${pill(CLAIM_ST, x.status)}</td><td class="small muted">${fdate(x.opened_at)}</td></tr>`).join("")}</tbody></table>` : `<p class="small muted" style="margin:0">No claims.</p>`}</div>
     ${notesSection("Calls, emails, what was promised…")}
-    <div class="section"><h4>Details</h4></div>` + fieldsHtml(CUST_F, c),
+    <div class="section" id="detailsSec"><h4>Details</h4></div>` + fieldsHtml(CUST_F, c),
     foot: `${delBtn()}<button class="btn primary" id="saveBtn">Save details</button>` });
-  wireNotes(dr, "al_customer_notes", "customer_id", id, notes);
+  wireNotes(dr, "al_customer_notes", "customer_id", id, notes); wireBack(dr, back);
+  if (c.email) dr.querySelector(".dr-h h2").insertAdjacentHTML("afterend", `<a class="btn sm" style="margin-left:auto" target="_blank" rel="noopener" href="${esc(gmailLink(c.email, "Arctic Leopard Australia", `Hi ${(c.full_name || "").split(" ")[0]},\n\n`))}">Email</a>`);
+  if (focusEdit) setTimeout(() => { dr.querySelector("#detailsSec").scrollIntoView({ block: "start" }); dr.querySelector("#f_full_name").focus(); }, 50);
   dr.querySelectorAll("[data-c]").forEach(r => r.onclick = () => openClaim(+r.dataset.c));
   dr.querySelectorAll("[data-bk]").forEach(r => r.onclick = () => openBike(+r.dataset.bk));
   dr.querySelector("#cClaim").onclick = () => openClaim(null, { customer_id: id });
-  dr.querySelector("#saveBtn").onclick = guard(async () => { const row = readFields(CUST_F); if (!row.full_name) throw new Error("A name is needed"); await saveRow("al_customers", id, row); await rerender(); toast("Saved"); openCustomer(id); });
+  dr.querySelector("#saveBtn").onclick = guard(async () => { const row = readFields(CUST_F); if (!row.full_name) throw new Error("A name is needed"); await saveRow("al_customers", id, row); await rerender(); toast("Saved"); back ? back.fn() : openCustomer(id); });
   armDelete(dr, async () => { await q(sb.from("al_customers").delete().eq("id", id)).catch(() => { throw new Error("This customer is linked to bikes, claims or orders, so it can't be deleted"); }); });
 }
 function openSimple(table, F, id, noun) {

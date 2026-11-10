@@ -30,6 +30,10 @@ Alternative: Shopify admin > Settings > Notifications > Webhooks > Create webhoo
 
 Parts: `AL-XE-###`, `AL-XF-###`, `AL-XX-###` (fits both). Bike models: `AL-<model code>` (e.g. `AL-XE-PRO-R`), and each bike gets a unit number `AL-XE-PRO-R-001` (trigger `al_bike_unit_no`). The part and model SKUs are on the Shopify variants. Shopify sells by model, so `al-shopify-stock` sets each model's Shopify stock to bikes in stock/PDI done and not reserved, and each part's to its on-hand count. It runs after a shipment is received and from Parts > Update Shopify stock.
 
+## Warranty parts arriving
+
+On a shipment, tick **Warranty part** on a line (or use **+ Requested warranty parts** to add every factory part marked Requested). When the shipment is received those lines don't go into sellable stock: `al_receive_shipment()` matches them to the claims waiting for that part (Requested first, oldest claim first), marks the claim part Received, moves the claim to Parts received and writes a line in its notes log. Anything left over goes into stock.
+
 ## Factory invoices
 
 Shipments > Upload factory invoice creates a shipment from the factory PI. Excel files are read (header row with Description / Unit price / QTY; "Chinese — English" descriptions keep the English) and lines are linked to bike models by name and to parts by earlier lines with the same description; bike records are created per unit. PDFs are attached only. The file is stored in the private bucket under `shipments/<id>/`.
