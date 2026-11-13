@@ -7,9 +7,9 @@
 <title>Warranty Form · Arctic Leopard Australia</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0d1117;--panel:#171717;--ink:#ffffff;--muted:#999999;--line:#3A3737;--accent:#E8302A;--accent-hi:#ff3b32;--err:#ff6b6b;--ok:#6fd38a}
+:root{--bg:#0d1117;--panel:#171717;--ink:#ffffff;--muted:#999999;--line:#3A3737;--accent:#E10A17;--accent-hi:#ff2a35;--err:#ff6b6b;--ok:#6fd38a}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Inter,"Helvetica Neue",Helvetica,Arial,sans-serif}
@@ -27,14 +27,14 @@ label b{color:var(--accent-hi);font-weight:600}
 input,select,textarea{width:100%;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:10px 12px;font:inherit}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
 input[type="file"]{padding:8px}
-input[type="file"]::file-selector-button,input[type="file"]::-webkit-file-upload-button{background:var(--accent);color:#ffffff;border:0;border-radius:4px;padding:8px 14px;margin-right:12px;font:inherit;font-weight:600;cursor:pointer;transition:background .2s ease}
+input[type="file"]::file-selector-button,input[type="file"]::-webkit-file-upload-button{background:var(--accent);color:#ffffff;border:0;border-radius:2px;padding:9px 16px;margin-right:12px;font:700 14px/1 'Barlow Condensed',Inter,sans-serif;text-transform:uppercase;letter-spacing:.16em;cursor:pointer;transition:background .2s ease}
 input[type="file"]::file-selector-button:hover,input[type="file"]::-webkit-file-upload-button:hover{background:var(--accent-hi)}
 textarea{min-height:140px;resize:vertical}
 .hint{font-size:12.5px;color:var(--muted)}
 .check{display:flex;gap:10px;align-items:flex-start;font-size:14px;color:var(--ink)}
-.check input{width:20px;height:20px;flex:none;accent-color:var(--accent);margin-top:2px}
-button{background:var(--accent);color:#ffffff;border:0;border-radius:100px;padding:13px 26px;font:inherit;font-weight:600;cursor:pointer;align-self:flex-start;transition:background .2s ease,box-shadow .2s ease}
-button:hover{background:var(--accent-hi);box-shadow:0 0 0 1px rgba(255,255,255,.08),0 10px 28px -6px rgba(0,0,0,.5),0 0 28px -4px rgba(232,48,42,.55)}
+.check input{appearance:none;-webkit-appearance:none;width:20px;height:20px;flex:none;margin-top:2px;padding:0;background:var(--bg);border:1px solid var(--line);border-radius:2px;cursor:pointer;display:grid;place-content:center}.check input:checked{background:var(--accent);border-color:var(--accent)}.check input:checked::after{content:'';width:6px;height:11px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg) translate(-1px,-1px)}
+button{background:var(--accent);color:#ffffff;border:0;border-radius:2px;padding:15px 34px;font:700 16px/1 'Barlow Condensed',Inter,sans-serif;text-transform:uppercase;letter-spacing:.2em;cursor:pointer;align-self:flex-start;transition:background .2s ease,box-shadow .2s ease}
+button:hover{background:var(--accent-hi);box-shadow:0 0 0 1px rgba(255,255,255,.08),0 10px 28px -6px rgba(0,0,0,.5),0 0 28px -4px rgba(225,10,23,.55)}
 button:disabled{opacity:.6;cursor:default;box-shadow:none}
 .err{color:var(--err);min-height:1em}
 .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
