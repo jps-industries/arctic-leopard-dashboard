@@ -28,6 +28,9 @@ label{font-size:13px;color:var(--muted)}
 label b{color:var(--accent-hi);font-weight:600}
 input,select,textarea{width:100%;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:10px 12px;font:inherit}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
+input[type="file"]{padding:8px}
+input[type="file"]::file-selector-button,input[type="file"]::-webkit-file-upload-button{background:var(--accent);color:#ffffff;border:0;border-radius:4px;padding:8px 14px;margin-right:12px;font:inherit;font-weight:600;cursor:pointer;transition:background .2s ease}
+input[type="file"]::file-selector-button:hover,input[type="file"]::-webkit-file-upload-button:hover{background:var(--accent-hi)}
 textarea{min-height:140px;resize:vertical}
 .hint{font-size:12.5px;color:var(--muted)}
 .check{display:flex;gap:10px;align-items:flex-start;font-size:14px;color:var(--ink)}
