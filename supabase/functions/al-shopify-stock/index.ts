@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
     const tok = await token();
     const out: Record<string, unknown> = {};
 
-    if (body.register_webhook) {
+    if (body.register_webhook) try {
       const uri = `${URL_}/functions/v1/al-shopify-order`;
       const made: string[] = [];
       for (const topic of ["ORDERS_PAID", "REFUNDS_CREATE", "ORDERS_CANCELLED"]) {
@@ -65,6 +65,46 @@ Deno.serve(async (req) => {
       }
       out.webhook = made.length ? "created" : "already set up";
       if (made.length) out.webhooks_created = made;
+    } catch (e) {
+      // Keep going when also syncing orders, so the backfill still runs and the error is reported.
+      if (!body.sync_orders) throw e;
+      out.webhook_error = (e as Error).message;
+    }
+
+    if (body.sync_orders) {
+      // Diagnose and backfill: list the webhooks Shopify has for this app, then replay any paid
+      // orders the dashboard hasn't seen through al-shopify-order (signed the same way Shopify signs).
+      const wh = await gql(tok, `{ webhookSubscriptions(first: 50) { nodes { topic uri } } }`);
+      out.webhooks = wh.webhookSubscriptions.nodes.map((n: { topic: string; uri: string }) => `${n.topic} -> ${n.uri.replace(/^https:\/\/[^/]+/, "")}`);
+      const r = await fetch(`https://${SHOP}/admin/api/${API}/orders.json?status=any&limit=50`, { headers: { "X-Shopify-Access-Token": tok } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(`Shopify orders (${r.status}): ${JSON.stringify(j.errors || j).slice(0, 300)}`);
+      const orders = (j.orders || []) as Record<string, any>[];
+      const { data: seen, error } = await db.from("al_shopify_orders").select("shopify_order_id"); if (error) throw error;
+      const have = new Set((seen || []).map((x: { shopify_order_id: unknown }) => String(x.shopify_order_id)));
+      const sign = async (raw: string) => {
+        const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(CSECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+        const sig = new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(raw)));
+        return btoa(String.fromCharCode(...sig));
+      };
+      const send = async (topic: string, payload: unknown) => {
+        const raw = JSON.stringify(payload);
+        const res = await fetch(`${URL_}/functions/v1/al-shopify-order`, { method: "POST", headers: { "content-type": "application/json", "x-shopify-topic": topic, "x-shopify-hmac-sha256": await sign(raw) }, body: raw });
+        if (!res.ok) throw new Error(`Order sync ${topic} failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+      };
+      const synced: string[] = [], unpaid: string[] = [], failed: string[] = [];
+      for (const o of orders.slice().reverse()) {
+        const paid = ["paid", "partially_refunded", "refunded", "partially_paid"].includes(o.financial_status);
+        if (!paid) { unpaid.push(`${o.name} (${o.financial_status})`); continue; }
+        if (have.has(String(o.id))) continue;
+        try {
+          await send("orders/paid", o);
+          for (const rf of o.refunds || []) await send("refunds/create", rf);
+          if (o.cancelled_at) await send("orders/cancelled", o);
+          synced.push(o.name);
+        } catch (e) { failed.push(`${o.name}: ${(e as Error).message}`); }
+      }
+      out.orders_found = orders.length; out.orders_synced = synced; out.orders_unpaid = unpaid; out.orders_failed = failed;
     }
 
     // What to push: everything, or just the given parts / models.

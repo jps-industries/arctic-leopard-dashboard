@@ -459,10 +459,12 @@ VIEWS.overview = () => {
       ${ships.length ? `<table><tbody>${ships.map(s => `<tr class="click" data-ship="${s.id}"><td>${esc(s.ref)}<div class="small muted">${esc(s.pi_number || "")}</div></td><td>${pill(SHIP_ST, s.status)}</td><td class="small">${s.eta ? "ETA " + fdate(s.eta) : `<span class="muted">No ETA</span>`}</td><td class="r small">${money(aud(s.usd_total, s.fx_rate))}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">Nothing on the water.</div>`}</div>
     <div class="panel"><h3>Pre-orders waiting for a bike <small>${pres.length}</small></h3>
       ${pres.length ? `<table><tbody>${pres.map(p => `<tr class="click" data-pre="${p.id}"><td>${esc(custName(p.customer_id) || dealerName(p.dealer_id) || "—")}</td><td>${esc(model(p.model_id).name)}</td><td class="r">${money(p.deposit_aud)}</td><td>${pill(PRE_ST, p.status)}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">No pre-orders waiting.</div>`}</div>
-    <div class="panel" style="grid-column:1/-1"><h3>Online orders from Shopify <small>applied to stock automatically</small></h3>
+    <div class="panel" style="grid-column:1/-1"><h3>Online orders from Shopify <small>applied to stock automatically</small> <button class="btn sm" id="syncOrders" title="Checks the Shopify order sync and pulls in any paid orders the dashboard missed">Sync orders from Shopify</button></h3>
+      ${S.orderSync ? `<div class="small" style="margin:10px 14px;white-space:pre-line">${esc(S.orderSync)}</div>` : ""}
       ${d.orders.length ? `<table><thead><tr><th>Order</th><th>When</th><th>Customer / dealer</th><th class="r">Total</th><th>What happened</th></tr></thead><tbody>${d.orders.slice(0, 10).map(o => `<tr><td class="mono">${esc(o.order_name || o.shopify_order_id)}</td><td class="small">${o.ordered_at ? new Date(o.ordered_at).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" }) : ""}</td><td>${esc(dealerName(o.dealer_id) || custName(o.customer_id) || o.email || "")}</td><td class="r">${money(o.total_aud, 2)}</td><td class="small">${[o.parts_lines ? o.parts_lines + " part line(s) out of stock" : "", o.bikes_reserved ? o.bikes_reserved + " bike(s) reserved" : "", o.preorders_created ? o.preorders_created + " pre-order(s), no bike free" : ""].filter(Boolean).join(" · ") || "—"}${refundNote(o)}${(o.unmatched || []).length ? `<div class="low">Not in dashboard: ${o.unmatched.map(u => esc(u.qty + "× " + u.title)).join(", ")}</div>` : ""}</td></tr>`).join("")}</tbody></table>` : `<div class="empty">No online orders yet. Once the Shopify webhook is set up, paid orders show here.</div>`}</div>
   </div>`);
   document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { S.tab = b.dataset.go; if (b.dataset.go === "bikes") S.f.bikeSt = b.dataset.f; if (b.dataset.go === "parts") S.f.partView = b.dataset.f || ""; if (b.dataset.go === "warranty") S.f.claimSt = "open"; localSet("al.tab", S.tab); render(); });
+  if ($("#syncOrders")) $("#syncOrders").onclick = syncShopifyOrders;
   document.querySelectorAll("[data-claim]").forEach(r => r.onclick = () => openClaim(+r.dataset.claim));
   document.querySelectorAll("[data-ship]").forEach(r => r.onclick = () => openShipment(+r.dataset.ship));
   document.querySelectorAll("[data-pre]").forEach(r => r.onclick = () => openPreorder(+r.dataset.pre));
@@ -643,6 +645,26 @@ async function pushShopifyStock(extra = {}) {
     if (!r.ok || !j.ok) throw new Error(j.error || "Shopify stock update failed");
     toast(`Shopify stock updated (${j.updated || 0} products)${j.webhook ? ", order and refund sync " + j.webhook : ""}`);
   } catch (e) { toast(e.message, true); }
+}
+
+/* ---- pull in paid Shopify orders the webhook missed, and check the webhooks are registered ---- */
+async function syncShopifyOrders() {
+  const b = $("#syncOrders"); if (b) { b.disabled = true; b.textContent = "Syncing…"; }
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const r = await fetch(`${SB_URL}/functions/v1/al-shopify-stock`, { method: "POST", headers: { "content-type": "application/json", apikey: SB_KEY, Authorization: `Bearer ${session?.access_token}` }, body: JSON.stringify({ sync_orders: true, register_webhook: true }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) throw new Error(j.error || "Order sync failed");
+    const lines = [
+      `Last sync ${new Date().toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" })}: ${j.orders_found || 0} recent order(s) in Shopify, ${(j.orders_synced || []).length} pulled in${(j.orders_synced || []).length ? " (" + j.orders_synced.join(", ") + ")" : ""}.`,
+      (j.orders_unpaid || []).length ? `Not marked paid in Shopify yet, so not counted: ${j.orders_unpaid.join(", ")}.` : "",
+      (j.orders_failed || []).length ? `Couldn't pull in: ${j.orders_failed.join(" | ")}` : "",
+      j.webhook_error ? `Automatic order sync couldn't be set up: ${j.webhook_error}` : (j.webhooks_created ? `Automatic sync was missing and is now set up (${j.webhooks_created.join(", ")}).` : "Automatic sync is set up."),
+    ].filter(Boolean);
+    S.orderSync = lines.join("\n");
+    await loadAll(); render();
+    toast((j.orders_synced || []).length ? `${j.orders_synced.length} order(s) pulled in from Shopify` : "No missing paid orders", !!(j.orders_failed || []).length || !!j.webhook_error);
+  } catch (e) { toast(e.message, true); if (b) { b.disabled = false; b.textContent = "Sync orders from Shopify"; } }
 }
 
 function partDatalist() { return `<datalist id="partList">${S.d.parts.map(p => `<option value="${esc(p.name)}">`).join("")}</datalist>`; }
