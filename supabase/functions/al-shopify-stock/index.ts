@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
     if (body.register_webhook) try {
       const uri = `${URL_}/functions/v1/al-shopify-order`;
       const made: string[] = [];
-      for (const topic of ["ORDERS_PAID", "REFUNDS_CREATE", "ORDERS_CANCELLED"]) {
+      for (const topic of ["ORDERS_PAID", "ORDERS_CREATE", "REFUNDS_CREATE", "ORDERS_CANCELLED"]) {
         const have = await gql(tok, `{ webhookSubscriptions(first: 50, topics: [${topic}]) { nodes { id uri } } }`);
         if (have.webhookSubscriptions.nodes.some((n: { uri: string }) => n.uri === uri)) continue;
         const r = await gql(tok, `mutation($u: String!) { webhookSubscriptionCreate(topic: ${topic}, webhookSubscription: { uri: $u, format: JSON }) { userErrors { message } } }`, { u: uri });
@@ -80,8 +80,9 @@ Deno.serve(async (req) => {
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(`Shopify orders (${r.status}): ${JSON.stringify(j.errors || j).slice(0, 300)}`);
       const orders = (j.orders || []) as Record<string, any>[];
-      const { data: seen, error } = await db.from("al_shopify_orders").select("shopify_order_id"); if (error) throw error;
+      const { data: seen, error } = await db.from("al_shopify_orders").select("shopify_order_id,balance_aud"); if (error) throw error;
       const have = new Set((seen || []).map((x: { shopify_order_id: unknown }) => String(x.shopify_order_id)));
+      const owing = new Set((seen || []).filter((x: { balance_aud: unknown }) => Number(x.balance_aud) > 0).map((x: { shopify_order_id: unknown }) => String(x.shopify_order_id)));
       const sign = async (raw: string) => {
         const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(CSECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
         const sig = new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(raw)));
@@ -92,11 +93,17 @@ Deno.serve(async (req) => {
         const res = await fetch(`${URL_}/functions/v1/al-shopify-order`, { method: "POST", headers: { "content-type": "application/json", "x-shopify-topic": topic, "x-shopify-hmac-sha256": await sign(raw) }, body: raw });
         if (!res.ok) throw new Error(`Order sync ${topic} failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
       };
-      const synced: string[] = [], unpaid: string[] = [], failed: string[] = [];
+      const synced: string[] = [], unpaid: string[] = [], failed: string[] = [], settled: string[] = [];
       for (const o of orders.slice().reverse()) {
         const paid = ["paid", "partially_refunded", "refunded", "partially_paid"].includes(o.financial_status);
         if (!paid) { unpaid.push(`${o.name} (${o.financial_status})`); continue; }
-        if (have.has(String(o.id))) continue;
+        if (have.has(String(o.id))) {
+          // A deposit order whose balance has since been paid in Shopify.
+          if (owing.has(String(o.id)) && o.financial_status !== "partially_paid" && !(Number(o.total_outstanding) > 0)) {
+            try { await send("orders/paid", o); settled.push(o.name); } catch (e) { failed.push(`${o.name}: ${(e as Error).message}`); }
+          }
+          continue;
+        }
         try {
           await send("orders/paid", o);
           for (const rf of o.refunds || []) await send("refunds/create", rf);
@@ -104,7 +111,7 @@ Deno.serve(async (req) => {
           synced.push(o.name);
         } catch (e) { failed.push(`${o.name}: ${(e as Error).message}`); }
       }
-      out.orders_found = orders.length; out.orders_synced = synced; out.orders_unpaid = unpaid; out.orders_failed = failed;
+      out.orders_found = orders.length; out.orders_synced = synced; out.orders_unpaid = unpaid; out.orders_failed = failed; out.orders_settled = settled;
     }
 
     // What to push: everything, or just the given parts / models.

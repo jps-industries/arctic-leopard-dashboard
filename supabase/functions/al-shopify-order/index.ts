@@ -1,5 +1,6 @@
 // Shopify webhooks -> Arctic Leopard dashboard: "Order payment" (orders/paid), "Refund create" (refunds/create)
-// and "Order cancellation" (orders/cancelled), told apart by the X-Shopify-Topic header.
+// and "Order cancellation" (orders/cancelled), told apart by the X-Shopify-Topic header. "Order creation" (orders/create)
+// is used only for pre-order deposit orders (partially paid), which never fire orders/paid until the balance is paid.
 // Refunds: restocked part lines go back into stock, refunded bikes are released back to stock (unless already
 // handed over), pre-orders are marked refunded, and the order's refunded amount / bike count reduce commission.
 // Discount codes are saved on the order so affiliate / creator codes count sales and commission.
@@ -46,13 +47,34 @@ Deno.serve(async (req) => {
   }
   const order = payload;
   const orderId = String(order.id);
+  // Pre-order deposits (STOQ "Reserve now, pay later"): Shopify marks these "partially_paid" and only sends
+  // orders/paid once the balance is collected, so deposit orders come in on orders/create instead.
+  const total = Number(order.total_price) || 0;
+  const outstanding = Math.max(0, Number(order.total_outstanding) || 0);
+  const isDeposit = order.financial_status === "partially_paid" || outstanding > 0.009;
+  const paidAud = Math.round((total - outstanding) * 100) / 100;
+  if (topic === "orders/create" && !isDeposit) return new Response("not a deposit order, waiting for orders/paid");
   // Already processed? Shopify retries webhooks, so this must be idempotent.
-  const seen = must(await db.from("al_shopify_orders").select("shopify_order_id").eq("shopify_order_id", orderId).maybeSingle());
-  if (seen) return new Response("already processed");
+  const seen = must(await db.from("al_shopify_orders").select("shopify_order_id,balance_aud").eq("shopify_order_id", orderId).maybeSingle());
+  if (seen) {
+    // A deposit order now paid in full: settle the pre-order and mark the bike paid.
+    if (!isDeposit && Number(seen.balance_aud) > 0) {
+      const today = new Date().toISOString().slice(0, 10);
+      must(await db.from("al_shopify_orders").update({ balance_aud: 0, paid_aud: total, fully_paid_at: new Date().toISOString() }).eq("shopify_order_id", orderId));
+      const pre = must(await db.from("al_preorders").select("id,agreed_price_aud,bike_id,notes").eq("shopify_order", order.name));
+      for (const p of pre) {
+        must(await db.from("al_preorders").update({ deposit_aud: p.agreed_price_aud, notes: [p.notes, `Balance paid online ${today}`].filter(Boolean).join(". ") }).eq("id", p.id));
+        if (p.bike_id) must(await db.from("al_bikes").update({ paid_date: today }).eq("id", p.bike_id));
+      }
+      return new Response("balance paid");
+    }
+    return new Response("already processed");
+  }
   // Claim the order id first so a parallel retry can't double-process it.
   const claim = await db.from("al_shopify_orders").insert({ shopify_order_id: orderId, order_name: order.name, email: (order.email || "").toLowerCase() || null, ordered_at: order.created_at, total_aud: Number(order.total_price) || null,
     subtotal_aud: order.subtotal_price != null ? Number(order.subtotal_price) : null,
-    discount_codes: (order.discount_codes || []).map((d: { code?: string }) => String(d.code || "").trim().toUpperCase()).filter(Boolean) });
+    discount_codes: (order.discount_codes || []).map((d: { code?: string }) => String(d.code || "").trim().toUpperCase()).filter(Boolean),
+    paid_aud: paidAud, balance_aud: isDeposit ? outstanding : 0, fully_paid_at: isDeposit ? null : new Date().toISOString() });
   if (claim.error) return new Response("already processing");
 
   try {
@@ -81,6 +103,7 @@ Deno.serve(async (req) => {
 
     let partsLines = 0, bikes = 0, preorders = 0, partsAud = 0;
     const unmatched: unknown[] = [];
+    const bikeLines: { modelId: number; unit: number | null; bike: { id: number; status: string } | null }[] = [];
     const ref = `Shopify ${order.name}`;
     const date = (order.processed_at || order.created_at || new Date().toISOString()).slice(0, 10);
 
@@ -115,17 +138,30 @@ Deno.serve(async (req) => {
             if (b.length) { bike = b[0]; break; }
           }
           if (bike) {
-            must(await db.from("al_bikes").update({ status: "reserved", customer_id: customerId, dealer_id: dealerId, sale_price_aud: unit, paid_date: date, notes: `Reserved by ${ref} (was ${bike.status}). Confirm frame no. at delivery.` }).eq("id", bike.id));
-            must(await db.from("al_preorders").insert({ customer_id: customerId, dealer_id: dealerId, model_id: model[0].id, agreed_price_aud: unit, deposit_aud: unit, deposit_date: date, bike_id: bike.id, status: "allocated", shopify_order: order.name, notes: "Paid online" }));
-            bikes++;
-          } else {
-            must(await db.from("al_preorders").insert({ customer_id: customerId, dealer_id: dealerId, model_id: model[0].id, agreed_price_aud: unit, deposit_aud: unit, deposit_date: date, status: "deposit_paid", shopify_order: order.name, notes: "Paid online, no bike free to allocate" }));
-            preorders++;
+            // Reserve straight away so the same bike can't be sold twice; the pre-order row is added below.
+            must(await db.from("al_bikes").update({ status: "reserved", customer_id: customerId, dealer_id: dealerId, sale_price_aud: unit }).eq("id", bike.id));
           }
+          bikeLines.push({ modelId: model[0].id, unit, bike });
         }
         continue;
       }
       unmatched.push({ title: li.title, qty, sku, product_id: pid, reason: "not in dashboard" });
+    }
+
+    // Pre-order rows. For a deposit order, the money paid so far (less any parts) is split across the bikes.
+    const perBikePaid = bikeLines.length ? Math.max(0, Math.round(((paidAud - partsAud) / bikeLines.length) * 100) / 100) : 0;
+    for (const b of bikeLines) {
+      const dep = isDeposit ? Math.min(b.unit ?? perBikePaid, perBikePaid) : b.unit;
+      const bal = isDeposit && b.unit != null ? Math.max(0, Math.round((b.unit - (dep || 0)) * 100) / 100) : 0;
+      const payNote = isDeposit ? `Deposit A$${dep} paid online, balance A$${bal} due` : "Paid online";
+      if (b.bike) {
+        must(await db.from("al_bikes").update({ paid_date: isDeposit ? null : date, notes: `Reserved by ${ref} (was ${b.bike.status}). ${payNote}. Confirm frame no. at delivery.` }).eq("id", b.bike.id));
+        must(await db.from("al_preorders").insert({ customer_id: customerId, dealer_id: dealerId, model_id: b.modelId, agreed_price_aud: b.unit, deposit_aud: dep, deposit_date: date, bike_id: b.bike.id, status: "allocated", shopify_order: order.name, notes: payNote }));
+        bikes++;
+      } else {
+        must(await db.from("al_preorders").insert({ customer_id: customerId, dealer_id: dealerId, model_id: b.modelId, agreed_price_aud: b.unit, deposit_aud: dep, deposit_date: date, status: "deposit_paid", shopify_order: order.name, notes: payNote + ", no bike free to allocate" }));
+        preorders++;
+      }
     }
 
     must(await db.from("al_shopify_orders").update({ customer_id: customerId, dealer_id: dealerId, parts_lines: partsLines, bikes_reserved: bikes, preorders_created: preorders, parts_aud: Math.round(partsAud * 100) / 100, unmatched }).eq("shopify_order_id", orderId));
